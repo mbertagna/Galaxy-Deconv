@@ -187,3 +187,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+/Galaxy-Deconv.env
