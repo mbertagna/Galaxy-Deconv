@@ -201,22 +201,23 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     
     t = np.linspace(0, 2*np.pi, 100)
     
-    for idx in range(batch_size):
-        row, col = idx // num_cols, idx % num_cols
+    for img_idx in range(batch_size):
+        row, col = img_idx // num_cols, img_idx % num_cols
         ax = axes[row, col]
         
         # Plot the image with extent to ensure correct aspect ratio
-        height, width = images_np[idx].shape
-        ax.imshow(images_np[idx], cmap='gray', extent=[0, width, height, 0])
+        height, width = images_np[img_idx].shape
+        ax.imshow(images_np[img_idx], cmap='gray', extent=[0, width, height, 0])
 
         color_codes = ['r', 'g', 'b', 'c', 'm', 'y']
         
-        for idx, ellipse_params in enumerate(ellipses_params):
+        # Loop over different ellipse parameters (from different peak positions)
+        for param_idx, ellipse_params in enumerate(ellipses_params):
             # Convert ellipse parameters to numpy
             params_np = ellipse_params.detach().cpu().numpy()
 
-            # Extract ellipse parameters
-            cx, cy, theta, a, b = params_np[idx]
+            # Extract ellipse parameters for current image in batch
+            cx, cy, theta, a, b = params_np[img_idx]  # Changed from idx to img_idx
             
             # Generate ellipse points
             x = a * np.cos(t)
@@ -230,11 +231,11 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
             points[:, 1] += cy
             
             # Plot the ellipse
-            ax.plot(points[:, 1], points[:, 0], color_codes[idx%len(color_codes)]+'-', linewidth=2)
-            ax.plot(cy, cx, color_codes[idx%len(color_codes)]+'+', markersize=10)
+            ax.plot(points[:, 1], points[:, 0], color_codes[param_idx%len(color_codes)]+'-', linewidth=2)
+            ax.plot(cy, cx, color_codes[param_idx%len(color_codes)]+'+', markersize=10)
         
-        ax.set_title(f'Image {idx}')
-        
+        ax.set_title(f'Image {img_idx}')
+    
     # Hide empty subplots
     for idx in range(batch_size, num_rows * num_cols):
         row, col = idx // num_cols, idx % num_cols
