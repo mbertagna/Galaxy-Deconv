@@ -186,6 +186,7 @@ def eloss(output_batch, target_batch):
 def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     """
     Plot a batch of images with their fitted ellipses overlaid.
+    Always shows a 40x40 unit view regardless of ellipse size.
     """
     # Convert images to numpy and ensure they're grayscale
     if images.dim() == 4:  # (B, C, H, W)
@@ -205,19 +206,29 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
         row, col = img_idx // num_cols, img_idx % num_cols
         ax = axes[row, col]
         
-        # Plot the image with extent to ensure correct aspect ratio
-        height, width = images_np[img_idx].shape
-        ax.imshow(images_np[img_idx], cmap='gray', extent=[0, width, height, 0])
+        # Plot the image with fixed extent for 40x40 units
+        ax.imshow(images_np[img_idx], cmap='gray', extent=[0, 40, 40, 0])
 
+        # Set fixed limits for 40x40 view
+        ax.set_xlim(0, 40)
+        ax.set_ylim(40, 0)  # Inverted y-axis to match image coordinates
+        
         color_codes = ['r', 'g', 'b', 'c', 'm', 'y']
         
         # Loop over different ellipse parameters (from different peak positions)
         for param_idx, ellipse_params in enumerate(ellipses_params):
-            # Convert ellipse parameters to numpy
             params_np = ellipse_params.detach().cpu().numpy()
-
-            # Extract ellipse parameters for current image in batch
-            cx, cy, theta, a, b = params_np[img_idx]  # Changed from idx to img_idx
+            cx, cy, theta, a, b = params_np[img_idx]
+            
+            # Scale the coordinates to match the 40x40 view
+            height, width = images_np[img_idx].shape
+            scale_x = 40 / width
+            scale_y = 40 / height
+            
+            cx = cx * scale_y  # Scale center x (note: x uses scale_y because of image coordinate system)
+            cy = cy * scale_x  # Scale center y (note: y uses scale_x because of image coordinate system)
+            a = a * scale_y    # Scale semi-major axis
+            b = b * scale_x    # Scale semi-minor axis
             
             # Generate ellipse points
             x = a * np.cos(t)
@@ -235,7 +246,8 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
             ax.plot(cy, cx, color_codes[param_idx%len(color_codes)]+'+', markersize=10)
         
         ax.set_title(f'Image {img_idx}')
-    
+        ax.grid(True)  # Add grid for better visibility of units
+        
     # Hide empty subplots
     for idx in range(batch_size, num_rows * num_cols):
         row, col = idx // num_cols, idx % num_cols
@@ -243,17 +255,6 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     
     plt.tight_layout()
     return fig, axes
-
-# Example usage:
-"""
-# Assuming you have:
-images = torch.randn(8, 64, 64)  # Your batch of images
-params = ellipse_params_batched(transform_tensor_batched(images))
-
-# Plot the results
-fig, axes = plot_batch_with_ellipses(images, params)
-plt.show()
-"""
 
 # import torch
 
