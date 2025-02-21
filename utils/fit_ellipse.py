@@ -184,15 +184,9 @@ def eloss(output_batch, target_batch):
     
     return ellipse_loss_batched(output_params, target_params)
 
-def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=None):
+def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=(15, 15)):
     """
     Plot a batch of images with their fitted ellipses overlaid.
-    
-    Args:
-        images: torch.Tensor of shape (B, H, W) or (B, C, H, W)
-        ellipse_params: torch.Tensor of shape (B, 5) containing [cx, cy, theta, a, b]
-        num_cols: Number of columns in the subplot grid
-        figsize: Size of the figure
     """
     # Convert images to numpy and ensure they're grayscale
     if images.dim() == 4:  # (B, C, H, W)
@@ -209,15 +203,15 @@ def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=None):
     if num_rows == 1:
         axes = axes.reshape(1, -1)
     
-    # Create points for plotting ellipses
     t = np.linspace(0, 2*np.pi, 100)
     
     for idx in range(batch_size):
         row, col = idx // num_cols, idx % num_cols
         ax = axes[row, col]
         
-        # Plot the image
-        ax.imshow(images_np[idx], cmap='gray')
+        # Plot the image with extent to ensure correct aspect ratio
+        height, width = images_np[idx].shape
+        ax.imshow(images_np[idx], cmap='gray', extent=[0, width, height, 0])
         
         # Extract ellipse parameters
         cx, cy, theta, a, b = params_np[idx]
@@ -235,13 +229,11 @@ def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=None):
         
         # Plot the ellipse
         ax.plot(points[:, 1], points[:, 0], 'r-', linewidth=2)
-        
-        # Plot the center point
         ax.plot(cy, cx, 'r+', markersize=10)
         
         ax.set_title(f'Image {idx}')
-        ax.axis('equal')
-    
+        ax.set_aspect('equal')  # This ensures square pixels
+        
     # Hide empty subplots
     for idx in range(batch_size, num_rows * num_cols):
         row, col = idx // num_cols, idx % num_cols
