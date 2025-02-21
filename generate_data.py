@@ -148,7 +148,7 @@ def generate_data_deconv(data_path, n_train=40000, load_info=True,
 
     # Read the catalog.
     try:
-        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/mnt/WD6TB/tianaoli/COSMOS_23.5_training_sample/', sample=I)
+        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/galsim/share/COSMOS_23.5_training_sample', sample=I)
         n_total = real_galaxy_catalog.nobjects #- 56030
         logger.info(' Successfully read in %s I=%s galaxies.', n_total, I)
     except:
@@ -363,7 +363,7 @@ def generate_data_denoise(data_path, n_train=40000, load_info=True,
 
     # Read the catalog.
     try:
-        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/mnt/WD6TB/tianaoli/COSMOS_23.5_training_sample/', sample=I)
+        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/galsim/share/COSMOS_23.5_training_sample/', sample=I)
         n_total = real_galaxy_catalog.nobjects #- 56030
         logger.info('Successfully read in %s I=%s galaxies.', n_total, I)
     except:
@@ -467,13 +467,13 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     
     if opt.task == 'Deconv':
-        generate_data_deconv(data_path='/mnt/WD6TB/tianaoli/dataset/LSST_23.5_deconv/', n_train=opt.n_train, load_info=opt.load_info,
+        generate_data_deconv(data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', n_train=opt.n_train, load_info=opt.load_info,
                              survey=opt.survey, I=opt.I, fov_pixels=opt.fov_pixels, pixel_scale=opt.pixel_scale, upsample=opt.upsample,
                              snrs=[20, 40, 60, 80, 100, 150, 200],
                              shear_errs=[0.003, 0.005, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],
                              fwhm_errs=[0.003, 0.005, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2])
     elif opt.task == 'Denoise':
-        generate_data_denoise(data_path='/mnt/WD6TB/tianaoli/dataset/LSST_23.5_denoise/', n_train=opt.n_train, load_info=opt.load_info,
+        generate_data_denoise(data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_denoise/', n_train=opt.n_train, load_info=opt.load_info,
                               survey=opt.survey, I=opt.I, fov_pixels=opt.fov_pixels, pixel_scale=opt.pixel_scale, upsample=opt.upsample)
     else:
         raise ValueError('Invalid task.')
