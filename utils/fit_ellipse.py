@@ -30,15 +30,14 @@ def transform_tensor_batched(tensor):
     return transformed_tensor
 
 def sigmoid_mask_batched(x: torch.Tensor, 
-                        peak_pos: float = 0.4, 
-                        sharpness: float = 20.0) -> torch.Tensor:
+                        peak_pos: float = 0.5, 
+                        sharpness: float = 0.1) -> torch.Tensor:
     """
     Batched version of sigmoid mask.
     Input shape: (B, H, W)
     Output shape: (B, H, W)
     """
-    scaled_x = sharpness * (x - peak_pos)
-    return x * torch.sigmoid(scaled_x) * (1 - torch.sigmoid(scaled_x - 2.0))
+    return 1 / torch.exp(((x - peak_pos) / sharpness) ** 2)
 
 def mask_to_points_and_weights_batched(mask):
     """
