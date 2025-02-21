@@ -99,13 +99,13 @@ def weighted_ellipse_fit_batched(points, weights):
     
     return params
 
-def ellipse_params_batched(image_tensor):
+def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float = 0.1):
     """
     Compute ellipse parameters for a batch of images.
     Input shape: (B, H, W)
     Output shape: (B, 5) containing [cx, cy, theta, a, b] for each image
     """
-    masked_image = sigmoid_mask_batched(image_tensor)
+    masked_image = sigmoid_mask_batched(image_tensor, peak_pos=peak_pos, sharpness=sharpness)
     points, weights = mask_to_points_and_weights_batched(masked_image)
     params = weighted_ellipse_fit_batched(points, weights)
     
@@ -183,7 +183,7 @@ def eloss(output_batch, target_batch):
     
     return ellipse_loss_batched(output_params, target_params)
 
-def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=(15, 15)):
+def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     """
     Plot a batch of images with their fitted ellipses overlaid.
     """
@@ -191,9 +191,6 @@ def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=(15, 15
     if images.dim() == 4:  # (B, C, H, W)
         images = images.mean(dim=1)
     images_np = images.detach().cpu().numpy()
-    
-    # Convert ellipse parameters to numpy
-    params_np = ellipse_params.detach().cpu().numpy()
     
     batch_size = images.shape[0]
     num_rows = (batch_size + num_cols - 1) // num_cols
@@ -211,27 +208,32 @@ def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=(15, 15
         # Plot the image with extent to ensure correct aspect ratio
         height, width = images_np[idx].shape
         ax.imshow(images_np[idx], cmap='gray', extent=[0, width, height, 0])
+
+        color_codes = ['r', 'g', 'b', 'c', 'm', 'y']
         
-        # Extract ellipse parameters
-        cx, cy, theta, a, b = params_np[idx]
-        
-        # Generate ellipse points
-        x = a * np.cos(t)
-        y = b * np.sin(t)
-        
-        # Rotate and translate the ellipse
-        R = np.array([[np.cos(theta), -np.sin(theta)],
-                     [np.sin(theta), np.cos(theta)]])
-        points = np.dot(np.stack([x, y], axis=1), R.T)
-        points[:, 0] += cx
-        points[:, 1] += cy
-        
-        # Plot the ellipse
-        ax.plot(points[:, 1], points[:, 0], 'r-', linewidth=2)
-        ax.plot(cy, cx, 'r+', markersize=10)
+        for idx, ellipse_params in enumerate(ellipses_params):
+            # Convert ellipse parameters to numpy
+            params_np = ellipse_params.detach().cpu().numpy()
+
+            # Extract ellipse parameters
+            cx, cy, theta, a, b = params_np[idx]
+            
+            # Generate ellipse points
+            x = a * np.cos(t)
+            y = b * np.sin(t)
+            
+            # Rotate and translate the ellipse
+            R = np.array([[np.cos(theta), -np.sin(theta)],
+                        [np.sin(theta), np.cos(theta)]])
+            points = np.dot(np.stack([x, y], axis=1), R.T)
+            points[:, 0] += cx
+            points[:, 1] += cy
+            
+            # Plot the ellipse
+            ax.plot(points[:, 1], points[:, 0], color_codes[idx%len(color_codes)]+'-', linewidth=2)
+            ax.plot(cy, cx, color_codes[idx%len(color_codes)]+'+', markersize=10)
         
         ax.set_title(f'Image {idx}')
-        ax.set_aspect('equal')  # This ensures square pixels
         
     # Hide empty subplots
     for idx in range(batch_size, num_rows * num_cols):
