@@ -184,7 +184,7 @@ def eloss(output_batch, target_batch):
     
     return ellipse_loss_batched(output_params, target_params)
 
-def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=(15, 15)):
+def plot_batch_with_ellipses(images, ellipse_params, num_cols=4, figsize=None):
     """
     Plot a batch of images with their fitted ellipses overlaid.
     
