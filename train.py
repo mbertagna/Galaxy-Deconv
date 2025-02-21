@@ -12,6 +12,7 @@ from models.unrolled_admm_gaussian import UnrolledADMMGaussian
 from utils.utils_data import get_dataloader
 from utils.utils_plot import plot_loss
 from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name
+from utils.fit_ellipse import eloss
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -59,7 +60,7 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     elif loss == 'MSE':
         loss_fn = torch.nn.MSELoss()
     elif loss == 'MultiScale':
-        loss_fn = MultiScaleLoss()
+        loss_fn = MultiScaleLoss(aux_loss_fn=eloss)
     
     optimizer = Adam(params=model.parameters(), lr = lr)
 
@@ -155,4 +156,4 @@ if __name__ == "__main__":
     train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
           n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss,
           data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
-          model_save_path='./saved_models_2024/', pretrained_epochs=opt.pretrained_epochs)
+          model_save_path='./saved_models_eloss/', pretrained_epochs=opt.pretrained_epochs)

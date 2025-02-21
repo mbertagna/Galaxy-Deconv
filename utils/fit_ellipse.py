@@ -1,5 +1,27 @@
 import torch
 
+def transform_tensor(tensor):
+    """
+    Transform a loaded tensor to match the format of the function that loads PNGs.
+    Ensures shape (H, W) with values in [0, 1] and gradients enabled.
+    """
+    if tensor.dim() == 2:  # Already grayscale
+        transformed_tensor = tensor.clone()
+    elif tensor.dim() == 3 and tensor.shape[0] in {1, 3}:  # Convert to single channel
+        transformed_tensor = tensor.mean(dim=0)  # Convert to grayscale
+    
+    # Normalize if needed
+    if transformed_tensor.max() > 1.0:
+        transformed_tensor = transformed_tensor / 255.0
+
+    # Min-max normalization
+    min_val, max_val = transformed_tensor.min(), transformed_tensor.max()
+    if max_val > min_val:  # Avoid division by zero
+        transformed_tensor = (transformed_tensor - min_val) / (max_val - min_val)
+    
+    transformed_tensor.requires_grad_(True)
+    return transformed_tensor
+
 def sigmoid_mask(x: torch.Tensor, 
                    peak_pos: float = 0.4, 
                    sharpness: float = 20.0) -> torch.Tensor:
@@ -52,74 +74,14 @@ def weighted_ellipse_fit(points, weights):
     
     return params
 
-def plot_galaxy_ellipse(image: torch.Tensor, params: torch.Tensor, ax=None):
-    """
-    Plot the galaxy image with fitted ellipse overlay.
-    
-    Parameters:
-        image (torch.Tensor): Original galaxy image
-        params (torch.Tensor): Fitted ellipse parameters [A, B, C, D, E, F]
-        ax (matplotlib.axes.Axes, optional): The axes to plot on
-    """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 10))
-    
-    # Plot the galaxy image
-    ax.imshow(image.cpu().numpy(), cmap='gray', origin='lower')
-    
-    # Convert parameters to tensors
-    A, B, C, D, E, F = [torch.tensor(x) for x in params.tolist()]
-    
-    # Calculate ellipse center
-    denominator = 4*A*C - B**2
-    cx = (B*E - 2*C*D) / denominator
-    cy = (B*D - 2*A*E) / denominator
-    
-    # Calculate rotation angle and semi-axes
-    theta = 0.5 * torch.atan2(B, A - C)
-    cos_t = torch.cos(theta)
-    sin_t = torch.sin(theta)
-    
-    # Calculate semi-axes lengths
-    a_squared = -2 * (A*cx**2 + C*cy**2 + B*cx*cy + D*cx + E*cy + F) / \
-                (A*cos_t**2 + B*cos_t*sin_t + C*sin_t**2)
-    b_squared = -2 * (A*cx**2 + C*cy**2 + B*cx*cy + D*cx + E*cy + F) / \
-                (A*sin_t**2 - B*cos_t*sin_t + C*cos_t**2)
-    
-    a = torch.sqrt(torch.abs(a_squared))
-    b = torch.sqrt(torch.abs(b_squared))
-    
-    # Generate ellipse points
-    t = torch.linspace(0, 2*np.pi, 200)
-    x_circle = a * torch.cos(t)
-    y_circle = b * torch.sin(t)
-    
-    # Rotate and translate
-    R = torch.tensor([[cos_t, -sin_t],
-                     [sin_t, cos_t]])
-    points = torch.stack([x_circle, y_circle])
-    rotated_points = R @ points
-    x = rotated_points[0] + cx
-    y = rotated_points[1] + cy
-    
-    # Plot ellipse overlay
-    ax.plot(y.numpy(), x.numpy(), 'r-', label='Fitted Ellipse', linewidth=2)
-    ax.scatter(cy.item(), cx.item(), color='yellow', marker='+', s=100, label='Center')
-    
-    # Customize plot
-    ax.set_title('Galaxy Image with Fitted Ellipse')
-    ax.legend()
-    return ax
-
 def ellipse_params(image_tensor):
-    gray_image = torch.einsum('chw,c->hw', image_tensor.detach(), torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device))
-    masked_image = sigmoid_mask(gray_image)
+    masked_image = sigmoid_mask(image_tensor)
     points, weights = mask_to_points_and_weights_full(masked_image)
     params = weighted_ellipse_fit(points, weights)
 
-    # Convert parameters to tensors
-    A, B, C, D, E, F = [torch.tensor(x) for x in params.tolist()]
-    
+    # Assuming params are already tensors, if not, convert them in a differentiable manner
+    A, B, C, D, E, F = [param.to(image_tensor.device) for param in params]
+
     # Calculate ellipse center
     denominator = 4*A*C - B**2
     cx = (B*E - 2*C*D) / denominator
@@ -139,43 +101,62 @@ def ellipse_params(image_tensor):
     a = torch.sqrt(torch.abs(a_squared))
     b = torch.sqrt(torch.abs(b_squared))
 
-    return (cx, cy), theta, a, b
+    return torch.stack([cx, cy, theta, a, b])
 
-def ellipse_loss(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0, epsilon=1e-6):
+def ellipse_loss(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
     """
-    Computes normalized loss between output and target ellipse parameters.
+    Computes normalized loss between output and target ellipse parameters where each
+    component (center, angle, axes) contributes equally to the total loss.
     
     Args:
-    - output_params: Tuple (cx_out, cy_out, theta_out, a_out, b_out)
-    - target_params: Tuple (cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt)
+    - output_params: (cx_out, cy_out, theta_out, a_out, b_out)
+    - target_params: (cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt)
     - center_weight: Weight for center loss
     - angle_weight: Weight for angle loss
     - axis_weight: Weight for axis loss
-    - epsilon: Small constant for numerical stability
     
     Returns:
-    - Total normalized loss (scalar tensor)
+    - total_loss: Combined normalized loss
     """
     # Unpack parameters
-    (cx_out, cy_out, theta_out, a_out, b_out) = output_params
-    (cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt) = target_params
+    cx_out, cy_out, theta_out, a_out, b_out = output_params
+    cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt = target_params
     
-    # Compute absolute differences
-    center_diff = torch.abs(torch.stack([cx_out, cy_out]) - torch.stack([cx_tgt, cy_tgt]))
-    angle_diff = torch.abs(theta_out - theta_tgt)
-    axis_diff = torch.abs(torch.stack([a_out, b_out]) - torch.stack([a_tgt, b_tgt]))
-
-    # Normalize each term by its range to make them comparable
-    norm_center = center_diff / (torch.abs(cx_tgt) + torch.abs(cy_tgt) + epsilon)
-    norm_angle = angle_diff / (torch.abs(theta_tgt) + epsilon)
-    norm_axis = axis_diff / (torch.abs(a_tgt) + torch.abs(b_tgt) + epsilon)
-
-    # Compute loss terms
-    center_loss = torch.mean(norm_center)
-    angle_loss = torch.mean(norm_angle)
-    axis_loss = torch.mean(norm_axis)
-
-    # Weighted sum of losses
-    total_loss = center_weight * center_loss + angle_weight * angle_loss + axis_weight * axis_loss
+    # Center loss (normalized by image size)
+    center_coords_out = torch.stack([cx_out, cy_out])
+    center_coords_tgt = torch.stack([cx_tgt, cy_tgt])
     
+    # Normalize center coordinates by the maximum of target axes
+    coord_scale = torch.max(torch.stack([a_tgt, b_tgt]))
+    normalized_center_loss = F.mse_loss(
+        center_coords_out / (coord_scale + 1e-8),
+        center_coords_tgt / (coord_scale + 1e-8)
+    )
+    
+    # Angle loss (normalized to be between 0 and 1)
+    # Convert angles to normalized direction vectors to handle periodicity
+    def angle_to_vector(theta):
+        return torch.stack([torch.cos(theta), torch.sin(theta)])
+    
+    angle_vec_out = angle_to_vector(theta_out)
+    angle_vec_tgt = angle_to_vector(theta_tgt)
+    normalized_angle_loss = 0.5 * torch.nn.functional.mse_loss(angle_vec_out, angle_vec_tgt)
+    
+    # Axis loss (normalized by the larger target axis)
+    axis_scale = torch.max(torch.stack([a_tgt, b_tgt]))
+    normalized_axis_loss = 0.5 * (
+        torch.nn.functional.l1_loss(a_out / (axis_scale + 1e-8), a_tgt / (axis_scale + 1e-8)) +
+        torch.nn.functional.l1_loss(b_out / (axis_scale + 1e-8), b_tgt / (axis_scale + 1e-8))
+    )
+    
+    # Combine losses with weights
+    total_loss = (
+        center_weight * normalized_center_loss +
+        angle_weight * normalized_angle_loss +
+        axis_weight * normalized_axis_loss
+    )
+
     return total_loss
+
+def eloss(output_i, target_i):
+    return ellipse_loss(ellipse_params(transform_tensor(output_i)), ellipse_params(transform_tensor(target_i)))
