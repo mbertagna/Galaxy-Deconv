@@ -5,6 +5,7 @@ def transform_tensor(tensor):
     Transform a loaded tensor to match the format of the function that loads PNGs.
     Ensures shape (H, W) with values in [0, 1] and gradients enabled.
     """
+    print(tensor.shape)
     transformed_tensor = tensor
     if tensor.dim() == 2:  # Already grayscale
         transformed_tensor = tensor.clone()
