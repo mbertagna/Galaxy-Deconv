@@ -170,12 +170,17 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     
     a = torch.sqrt(torch.abs(a_squared))
     b = torch.sqrt(torch.abs(b_squared))
+
+
+    # Normalize by semi-major axis
+    normalized_dist = weighted_samsons_dist / (a + 1e-8)
     
-    total_weighted_dist = torch.sum(weighted_samsons_dist, dim=1)  # (B,)
-    total_weight = torch.sum(weights, dim=1)  # (B,)
-    mean_samsons_dist = total_weighted_dist / (total_weight + 1e-8)  # (B,)
+    # Calculate weighted mean
+    total_weighted_dist = torch.sum(normalized_dist * weights, dim=1)
+    total_weight = torch.sum(weights, dim=1)
+    mean_normalized_samsons_dist = total_weighted_dist / (total_weight + 1e-8)
     
-    return torch.stack([cx, cy, theta, a, b], dim=-1), mean_samsons_dist
+    return torch.stack([cx, cy, theta, a, b], dim=-1), mean_normalized_samsons_dist
 
 def ellipse_loss_batched(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
     """
