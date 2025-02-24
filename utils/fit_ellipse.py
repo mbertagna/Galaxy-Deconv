@@ -155,7 +155,7 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     # Extract parameters
     A, B, C, D, E, F = params.unbind(-1)
     
-    # Calculate ellipse parameters as before...
+    # Calculate ellipse parameters
     denominator = 4*A*C - B**2
     cx = (B*E - 2*C*D) / (denominator + 1e-8)
     cy = (B*D - 2*A*E) / (denominator + 1e-8)
@@ -171,9 +171,11 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     a = torch.sqrt(torch.abs(a_squared))
     b = torch.sqrt(torch.abs(b_squared))
 
-
+    # Reshape a for proper broadcasting: (B,) -> (B, 1)
+    a_expanded = a.unsqueeze(1)  # Now shape is (B, 1)
+    
     # Normalize by semi-major axis
-    normalized_dist = weighted_samsons_dist / (a + 1e-8)
+    normalized_dist = weighted_samsons_dist / (a_expanded + 1e-8)
     
     # Calculate weighted mean
     total_weighted_dist = torch.sum(normalized_dist * weights, dim=1)
