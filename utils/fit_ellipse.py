@@ -175,7 +175,7 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     total_weight = torch.sum(weights, dim=1)  # (B,)
     mean_samsons_dist = total_weighted_dist / (total_weight + 1e-8)  # (B,)
     
-    return params, mean_samsons_dist
+    return torch.stack([cx, cy, theta, a, b], dim=-1), mean_samsons_dist
 
 def ellipse_loss_batched(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
     """
@@ -219,14 +219,14 @@ def ellipse_loss_batched(output_params, target_params, center_weight=1.0, angle_
     
     return total_loss
 
-def eloss(output_batch, target_batch):
-    transformed_output = transform_tensor_batched(output_batch)
-    transformed_target = transform_tensor_batched(target_batch)
+# def eloss(output_batch, target_batch):
+#     transformed_output = transform_tensor_batched(output_batch)
+#     transformed_target = transform_tensor_batched(target_batch)
     
-    output_params, _ = ellipse_params_batched(transformed_output)
-    target_params, _ = ellipse_params_batched(transformed_target)
+#     output_params, _ = ellipse_params_batched(transformed_output)
+#     target_params, _ = ellipse_params_batched(transformed_target)
     
-    return ellipse_loss_batched(output_params, target_params)
+#     return ellipse_loss_batched(output_params, target_params)
 
 def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     """
