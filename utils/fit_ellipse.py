@@ -63,9 +63,49 @@ def mask_to_points_and_weights_batched(mask):
     
     return points, weights
 
+def weighted_samsons_distance_batched(points, coeffs, weights):
+    """
+    Compute weighted Samson's distance for batches of points given batches of ellipse coefficients.
+    
+    Args:
+        points: Tensor of shape (B, N, 2), where B is batch size, N is number of points, 
+                and each point is (y, x) following your convention.
+        coeffs: Tensor of shape (B, 6), where coeffs = (A, B, C, D, E, F) for each batch.
+        weights: Tensor of shape (B, N), containing the weight for each point in each batch.
+    
+    Returns:
+        Tensor of shape (B, N) with weighted Samson's distances for each point in each batch.
+    """
+    y, x = points[..., 0], points[..., 1]  # Using your coordinate convention
+    
+    # Extract coefficients for each batch (B, 6) -> (B, 1) for broadcasting
+    A = coeffs[:, 0:1]
+    B = coeffs[:, 1:2]
+    C = coeffs[:, 2:3]
+    D = coeffs[:, 3:4]
+    E = coeffs[:, 4:5]
+    F = coeffs[:, 5:6]
+
+    # Compute the algebraic distance for each point in each batch
+    algebraic_dist = A * x**2 + B * x * y + C * y**2 + D * x + E * y + F  # (B, N)
+
+    # Compute the gradient magnitude normalization term
+    # Using the correct gradient computation
+    grad_x = 2*A*x + B*y + D  # (B, N)
+    grad_y = B*x + 2*C*y + E  # (B, N)
+    grad_magnitude = torch.sqrt(grad_x**2 + grad_y**2)  # (B, N)
+
+    # Compute Samson's distance
+    samsons_dist = torch.abs(algebraic_dist) / (grad_magnitude + 1e-8)  # (B, N)
+    
+    # Apply weights
+    weighted_samsons_dist = samsons_dist * weights  # (B, N)
+
+    return weighted_samsons_dist
+
 def weighted_ellipse_fit_batched(points, weights):
     """
-    Batched version of weighted ellipse fit with confidence score.
+    Batched version of weighted ellipse fit.
     
     Parameters:
         points (Tensor): (B, N, 2) tensor of (x, y) points
@@ -73,7 +113,6 @@ def weighted_ellipse_fit_batched(points, weights):
     
     Returns:
         params (Tensor): (B, 6) tensor of ellipse parameters [A, B, C, D, E, F]
-        confidence (Tensor): (B,) tensor of confidence scores in [0, 1]
     """
     B, N, _ = points.shape
     
@@ -88,88 +127,17 @@ def weighted_ellipse_fit_batched(points, weights):
     D_weighted = D * weights.unsqueeze(-1)  # (B, N, 6)
     
     # Solve using SVD for each batch
+    # We can use torch.svd on the whole batch at once
     U, S, V = torch.svd(D_weighted)
     
     # Get the last column of V for each batch
     params = V[..., -1]  # (B, 6)
     
-    # Calculate confidence score based on multiple factors:
-    
-    # 1. Singular value ratio (how well-determined the solution is)
-    singular_ratio = S[..., -1] / (S[..., -2] + 1e-8)  # Ratio of smallest to second-smallest singular value
-    sv_confidence = torch.exp(-singular_ratio)  # Convert to [0,1] range
-    
-    # 2. Residual error
-    predicted = torch.sum(D * params.unsqueeze(1), dim=-1)  # (B, N)
-    residuals = predicted * weights  # Apply weights to residuals
-    mse = torch.mean(residuals**2, dim=-1)  # (B,)
-    residual_confidence = torch.exp(-mse)  # Convert to [0,1] range
-    
-    # 3. Weight distribution (how well distributed the significant points are)
-    weight_sum = torch.sum(weights, dim=-1)  # (B,)
-    weight_threshold = 0.5  # Consider points with weights > 0.5 as significant
-    significant_points = torch.sum(weights > weight_threshold, dim=-1).float()  # (B,)
-    distribution_confidence = torch.clamp(significant_points / (N/4), 0, 1)  # Normalize by expecting at least N/4 significant points
-    
-    # 4. Check if parameters define a valid ellipse
-    A, B, C, D, E, F = params.unbind(-1)
-    discriminant = 4*A*C - B**2  # Should be positive for valid ellipse
-    valid_ellipse = (discriminant > 0).float()
-    
-    # Combine confidence scores
-    confidence = (
-        sv_confidence * 0.3 +           # Weight for solution stability
-        residual_confidence * 0.3 +     # Weight for fit quality
-        distribution_confidence * 0.2 +  # Weight for point distribution
-        valid_ellipse * 0.2             # Weight for ellipse validity
-    )
-
-    print(sv_confidence)
-    print(residual_confidence)
-    print(distribution_confidence)
-    print(valid_ellipse)
-    
     # Normalize parameters
     norm = torch.norm(params, dim=-1, keepdim=True)
     params = params / (norm + 1e-8)
     
-    return params, confidence
-
-# def weighted_ellipse_fit_batched(points, weights):
-#     """
-#     Batched version of weighted ellipse fit.
-    
-#     Parameters:
-#         points (Tensor): (B, N, 2) tensor of (x, y) points
-#         weights (Tensor): (B, N) tensor of weights
-    
-#     Returns:
-#         params (Tensor): (B, 6) tensor of ellipse parameters [A, B, C, D, E, F]
-#     """
-#     B, N, _ = points.shape
-    
-#     # Extract x and y coordinates
-#     x = points[..., 0]  # (B, N)
-#     y = points[..., 1]  # (B, N)
-    
-#     # Construct the design matrix (B, N, 6)
-#     D = torch.stack((x**2, x*y, y**2, x, y, torch.ones_like(x)), dim=-1)
-    
-#     # Apply weights to design matrix
-#     D_weighted = D * weights.unsqueeze(-1)  # (B, N, 6)
-    
-#     # Solve using SVD for each batch
-#     # We can use torch.svd on the whole batch at once
-#     U, S, V = torch.svd(D_weighted)
-    
-#     # Get the last column of V for each batch
-#     params = V[..., -1]  # (B, 6)
-    
-#     # Normalize parameters
-#     norm = torch.norm(params, dim=-1, keepdim=True)
-#     params = params / (norm + 1e-8)
-    
-#     return params
+    return params
 
 def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float = 0.1):
     """
@@ -177,11 +145,12 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     Input shape: (B, H, W)
     Output shapes: 
         params: (B, 5) containing [cx, cy, theta, a, b]
-        confidence: (B,) containing confidence scores
+        samsons_dist: (B,) containing confidence scores
     """
     masked_image = sigmoid_mask_batched(image_tensor, peak_pos=peak_pos, sharpness=sharpness)
     points, weights = mask_to_points_and_weights_batched(masked_image)
-    params, confidence = weighted_ellipse_fit_batched(points, weights)
+    params = weighted_ellipse_fit_batched(points, weights)
+    weighted_samsons_dist = weighted_samsons_distance_batched(points, params, weights)  # (B, H*W)
     
     # Extract parameters
     A, B, C, D, E, F = params.unbind(-1)
@@ -202,7 +171,11 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     a = torch.sqrt(torch.abs(a_squared))
     b = torch.sqrt(torch.abs(b_squared))
     
-    return torch.stack([cx, cy, theta, a, b], dim=-1), confidence
+    total_weighted_dist = torch.sum(weighted_samsons_dist, dim=1)  # (B,)
+    total_weight = torch.sum(weights, dim=1)  # (B,)
+    mean_samsons_dist = total_weighted_dist / (total_weight + 1e-8)  # (B,)
+    
+    return params, mean_samsons_dist
 
 def ellipse_loss_batched(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
     """
@@ -250,8 +223,8 @@ def eloss(output_batch, target_batch):
     transformed_output = transform_tensor_batched(output_batch)
     transformed_target = transform_tensor_batched(target_batch)
     
-    output_params = ellipse_params_batched(transformed_output)
-    target_params = ellipse_params_batched(transformed_target)
+    output_params, _ = ellipse_params_batched(transformed_output)
+    target_params, _ = ellipse_params_batched(transformed_target)
     
     return ellipse_loss_batched(output_params, target_params)
 
