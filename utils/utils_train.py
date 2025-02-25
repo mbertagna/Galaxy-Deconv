@@ -170,15 +170,12 @@ class MultiEllipseLoss(nn.Module):
         Process multiple ellipse predictions and targets.
         
         Args:
-            output_batch: List of num_ellipses tensors, each with shape (B, 5)
-            target_batch: List of num_ellipses tensors, each with shape (B, 5)
+            output_batch: List of tensors, each with shape (B, 5)
+            target_batch: List of tensors, each with shape (B, 5)
             
         Returns:
             Scalar loss value aggregating all ellipses
         """
-        assert len(output_batch) == len(target_batch) == self.num_ellipses, \
-               f"Expected {self.num_ellipses} ellipses, got {len(output_batch)} outputs and {len(target_batch)} targets"
-        
         # Compute individual losses for each ellipse set
         individual_losses = []
         for i in range(self.num_ellipses):
