@@ -1,0 +1,31 @@
+INFO:Train: Start training Gaussian_PnP_ADMM_2iters_MultiScale on /home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv data for 10 epochs.
+INFO:Dataset: Successfully constructed train dataset. Total Samples: 40000.
+Traceback (most recent call last):
+  File "/home/michaelbertagna/git/Galaxy-Deconv/train.py", line 156, in <module>
+    train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
+  File "/home/michaelbertagna/git/Galaxy-Deconv/train.py", line 76, in train
+    loss = loss_fn(gt, rec)
+           ^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/utils/utils_train.py", line 47, in forward
+    aux_loss = self.aux_loss_fn(output_i, target_i) if self.aux_loss_fn else 0
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/utils/fit_ellipse.py", line 163, in eloss
+    return ellipse_loss(ellipse_params(transform_tensor(output_i)), ellipse_params(transform_tensor(target_i)))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/utils/fit_ellipse.py", line 80, in ellipse_params
+    points, weights = mask_to_points_and_weights_full(masked_image)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/utils/fit_ellipse.py", line 40, in mask_to_points_and_weights_full
+    H, W = mask.shape
+    ^^^^
+ValueError: too many values to unpack (expected 2)
+
+real	0m4.259s
+user	0m6.810s
+sys	0m0.597s

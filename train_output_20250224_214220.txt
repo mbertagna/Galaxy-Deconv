@@ -1,0 +1,22 @@
+INFO:Train: Start training Gaussian_PnP_ADMM_2iters_MultiEllipse on /home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv data for 10 epochs.
+INFO:Dataset: Successfully constructed train dataset. Total Samples: 40000.
+Traceback (most recent call last):
+  File "/home/michaelbertagna/git/Galaxy-Deconv/train.py", line 164, in <module>
+    train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
+  File "/home/michaelbertagna/git/Galaxy-Deconv/train.py", line 84, in train
+    loss = loss_fn(gt, rec)
+           ^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/michaelbertagna/git/Galaxy-Deconv/utils/utils_train.py", line 179, in forward
+    assert len(output_batch) == len(target_batch) == self.num_ellipses, \
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Expected 5 ellipses, got 32 outputs and 32 targets
+
+real	0m4.352s
+user	0m6.703s
+sys	0m0.724s

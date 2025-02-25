@@ -1,0 +1,51 @@
+INFO:Train: Start training Gaussian_PnP_ADMM_2iters_MultiScale on /home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv data for 10 epochs.
+INFO:Dataset: Successfully constructed train dataset. Total Samples: 40000.
+/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/torch/functional.py:534: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3595.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+INFO:Train: [1: 25/1125]  train_loss=13.23  val_loss=30.05
+INFO:Train: [1: 50/1125]  train_loss=16.72  val_loss=70.43
+INFO:Train: [1: 75/1125]  train_loss=1048  val_loss=1279
+INFO:Train: [1: 100/1125]  train_loss=163.2  val_loss=197
+INFO:Train: [1: 125/1125]  train_loss=23.34  val_loss=20.34
+INFO:Train: [1: 150/1125]  train_loss=11.46  val_loss=15.25
+INFO:Train: [1: 175/1125]  train_loss=13.1  val_loss=15.52
+INFO:Train: [1: 200/1125]  train_loss=13.76  val_loss=14.75
+INFO:Train: [1: 225/1125]  train_loss=15.42  val_loss=13.99
+INFO:Train: [1: 250/1125]  train_loss=11.7  val_loss=14.25
+INFO:Train: [1: 275/1125]  train_loss=15.92  val_loss=18.6
+INFO:Train: [1: 300/1125]  train_loss=19.29  val_loss=16.97
+INFO:Train: [1: 325/1125]  train_loss=12.82  val_loss=14.56
+INFO:Train: [1: 350/1125]  train_loss=14.19  val_loss=15.03
+INFO:Train: [1: 375/1125]  train_loss=9.654  val_loss=14.73
+INFO:Train: [1: 400/1125]  train_loss=84.89  val_loss=103.7
+INFO:Train: [1: 425/1125]  train_loss=39.38  val_loss=35.75
+INFO:Train: [1: 450/1125]  train_loss=14.44  val_loss=17
+INFO:Train: [1: 475/1125]  train_loss=15.09  val_loss=15.56
+INFO:Train: [1: 500/1125]  train_loss=13.55  val_loss=17.01
+INFO:Train: [1: 525/1125]  train_loss=15.44  val_loss=15.8
+INFO:Train: [1: 550/1125]  train_loss=12.46  val_loss=18.27
+INFO:Train: [1: 575/1125]  train_loss=16.65  val_loss=15.54
+INFO:Train: [1: 600/1125]  train_loss=15.15  val_loss=17.31
+INFO:Train: [1: 625/1125]  train_loss=15.8  val_loss=22.72
+INFO:Train: [1: 650/1125]  train_loss=14.57  val_loss=19.68
+INFO:Train: [1: 675/1125]  train_loss=18.62  val_loss=18.74
+INFO:Train: [1: 700/1125]  train_loss=18.21  val_loss=14.74
+INFO:Train: [1: 725/1125]  train_loss=38.27  val_loss=54.41
+INFO:Train: [1: 750/1125]  train_loss=26.57  val_loss=35.32
+INFO:Train: [1: 775/1125]  train_loss=15.9  val_loss=16.84
+INFO:Train: [1: 800/1125]  train_loss=15.65  val_loss=19.42
+INFO:Train: [1: 825/1125]  train_loss=2.684e+06  val_loss=4.778e+06
+INFO:Train: [1: 850/1125]  train_loss=7.349e+04  val_loss=7.075e+04
+INFO:Train: [1: 875/1125]  train_loss=2779  val_loss=2218
+INFO:Train: [1: 900/1125]  train_loss=3.921e+04  val_loss=4.159e+04
+INFO:Train: [1: 925/1125]  train_loss=2.471e+04  val_loss=1.847e+04
+INFO:Train: [1: 950/1125]  train_loss=5123  val_loss=5349
+INFO:Train: [1: 975/1125]  train_loss=1957  val_loss=2322
+INFO:Train: [1: 1000/1125]  train_loss=1097  val_loss=1221
+INFO:Train: [1: 1025/1125]  train_loss=820.5  val_loss=698
+INFO:Train: [1: 1050/1125]  train_loss=297.4  val_loss=405.9
+INFO:Train: [1: 1075/1125]  train_loss=233.6  val_loss=241.4
+INFO:Train: [1: 1100/1125]  train_loss=173.7  val_loss=162.3
+INFO:Train: [1: 1125/1125]  train_loss=122.6  val_loss=120.7
+INFO:Train: [1: 1125/1125]  train_loss=120.4  val_loss=120.7
+INFO:Train: Model saved to ./saved_models_eloss/Gaussian_PnP_ADMM_2iters_MultiScale_1epochs.pth
