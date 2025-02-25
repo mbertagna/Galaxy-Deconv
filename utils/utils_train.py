@@ -164,58 +164,6 @@ class MultiEllipseLoss(nn.Module):
             raise ValueError(f"Unsupported aggregation method: {self.loss_aggregation}")
             
         return final_loss
-    
-    def forward(self, output_batch, target_batch):
-        """
-        Process multiple ellipse predictions and targets.
-        
-        Args:
-            output_batch: List of tensors, each with shape (B, 5)
-            target_batch: List of tensors, each with shape (B, 5)
-            
-        Returns:
-            Scalar loss value aggregating all ellipses
-        """
-        # Compute individual losses for each ellipse set
-        individual_losses = []
-        for i in range(self.num_ellipses):
-            loss_i = self.ellipse_loss_symmetric(output_batch[i], target_batch[i])
-            individual_losses.append(loss_i)
-            
-        # Convert to tensor
-        individual_losses = torch.stack(individual_losses)
-        
-        # Aggregate losses based on selected method
-        if self.loss_aggregation == 'weighted_sum':
-            # Weighted sum of all ellipse losses
-            final_loss = torch.sum(individual_losses * self.ellipse_weights.to(individual_losses.device))
-            
-        elif self.loss_aggregation == 'min':
-            # Take the minimum loss (focus on best matching ellipse)
-            final_loss = torch.min(individual_losses)
-            
-        elif self.loss_aggregation == 'max':
-            # Take the maximum loss (focus on worst matching ellipse)
-            final_loss = torch.max(individual_losses)
-            
-        elif self.loss_aggregation == 'median':
-            # Take the median loss
-            final_loss = torch.median(individual_losses)
-            
-        elif self.loss_aggregation == 'mean':
-            # Simple average
-            final_loss = torch.mean(individual_losses)
-            
-        elif self.loss_aggregation == 'adaptive':
-            # Weight inversely proportional to loss value (focus more on well-matched ellipses)
-            weights = 1.0 / (individual_losses + 1e-8)
-            weights = weights / weights.sum()
-            final_loss = torch.sum(individual_losses * weights)
-            
-        else:
-            raise ValueError(f"Unsupported aggregation method: {self.loss_aggregation}")
-            
-        return final_loss
 
 class MultiScaleLoss(nn.Module):
     def __init__(self, scales=3, norm='L1', aux_loss_fn=None, aux_weight=0.1):
