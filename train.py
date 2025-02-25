@@ -11,8 +11,7 @@ from models.Unrolled_ADMM import Unrolled_ADMM
 from models.unrolled_admm_gaussian import UnrolledADMMGaussian
 from utils.utils_data import get_dataloader
 from utils.utils_plot import plot_loss
-from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name
-from utils.fit_ellipse import eloss
+from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, MultiEllipseLoss
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -60,7 +59,16 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     elif loss == 'MSE':
         loss_fn = torch.nn.MSELoss()
     elif loss == 'MultiScale':
-        loss_fn = MultiScaleLoss(aux_loss_fn=eloss)
+        loss_fn = MultiScaleLoss()
+    elif loss == 'MultiEllipse':
+        loss_fn = MultiEllipseLoss(
+            ellipse_levels=[0.3, 0.4, 0.5, 0.6, 0.7],
+            center_weight=1.0,
+            angle_weight=1.0,
+            axis_weight=1.0,
+            ellipse_weights=None,
+            loss_aggregation='min'
+        )
     
     optimizer = Adam(params=model.parameters(), lr = lr)
 
@@ -146,7 +154,7 @@ if __name__ == "__main__":
     parser.add_argument('--filter', type=str, default='Laplacian', choices=['Identity', 'Laplacian'])
     parser.add_argument('--n_epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape'])
+    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'MultiEllipse'])
     parser.add_argument('--train_val_split', type=float, default=0.9)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
@@ -156,4 +164,4 @@ if __name__ == "__main__":
     train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
           n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss,
           data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
-          model_save_path='./saved_models_eloss/', pretrained_epochs=opt.pretrained_epochs)
+          model_save_path='./saved_models_ellipse_loss/', pretrained_epochs=opt.pretrained_epochs)
