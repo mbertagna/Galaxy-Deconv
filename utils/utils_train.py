@@ -3,7 +3,7 @@ import torch
 import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.fit_ellipse import transform_tensor_batched, ellipse_params_batched
+from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched
 
 
 # import utils.cadmos_lib as cl
@@ -118,8 +118,8 @@ class MultiEllipseLoss(nn.Module):
         
         for pp in self.ellipse_levels:
             # Extract ellipse parameters from output and target at current peak position level
-            output_params, _ = ellipse_params_batched(transform_tensor_batched(output), peak_pos=pp)
-            target_params, _ = ellipse_params_batched(transform_tensor_batched(target), peak_pos=pp)
+            output_params, _ = safe_ellipse_params_batched(transform_tensor_batched(output), peak_pos=pp)
+            target_params, _ = safe_ellipse_params_batched(transform_tensor_batched(target), peak_pos=pp)
             
             output_params_list.append(output_params)
             target_params_list.append(target_params)
