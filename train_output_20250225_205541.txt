@@ -1,0 +1,10 @@
+INFO:Train: Start training Gaussian_PnP_ADMM_2iters_MultiEllipse on /home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv data for 10 epochs.
+INFO:Dataset: Successfully constructed train dataset. Total Samples: 40000.
+/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/torch/functional.py:534: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3595.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+INFO:Train: [1: 25/1125]  train_loss=49.03  val_loss=1.438e+07
+INFO:Train: [1: 50/1125]  train_loss=10.54  val_loss=2.438e+06
+INFO:Train: [1: 75/1125]  train_loss=5.247  val_loss=3.126e+05
+INFO:Train: [1: 100/1125]  train_loss=567.7  val_loss=3.354e+05
+INFO:Train: [1: 125/1125]  train_loss=4.642  val_loss=3.156e+06
+INFO:Train: [1: 150/1125]  train_loss=7.542  val_loss=1.686e+06
