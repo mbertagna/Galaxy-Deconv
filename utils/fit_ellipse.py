@@ -20,27 +20,14 @@ def transform_tensor_batched(tensor):
     if transformed_tensor.max() > 1.0:
         transformed_tensor = transformed_tensor / 255.0
 
-    # Min-max normalization per batch with improved numerical stability
-    tensor_reshaped = transformed_tensor.view(transformed_tensor.shape[0], -1)
-    min_val = tensor_reshaped.min(dim=1, keepdim=True)[0].unsqueeze(-1)
-    max_val = tensor_reshaped.max(dim=1, keepdim=True)[0].unsqueeze(-1)
+    # Min-max normalization per batch
+    min_val = transformed_tensor.view(transformed_tensor.shape[0], -1).min(dim=1, keepdim=True)[0].unsqueeze(-1)
+    max_val = transformed_tensor.view(transformed_tensor.shape[0], -1).max(dim=1, keepdim=True)[0].unsqueeze(-1)
+    valid_range = (max_val > min_val).float()
+    transformed_tensor = valid_range * (transformed_tensor - min_val) / (max_val - min_val + 1e-8) + (1 - valid_range) * transformed_tensor
     
-    # Check for valid range with improved stability
-    range_diff = max_val - min_val
-    valid_range = (range_diff > 1e-6).float()
-    
-    # Use where to avoid division by zero
-    normalized = torch.where(
-        valid_range > 0,
-        (transformed_tensor - min_val) / (range_diff + 1e-8),
-        torch.zeros_like(transformed_tensor)
-    )
-    
-    # Replace any NaN or Inf values with zeros
-    normalized = torch.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0)
-    
-    normalized.requires_grad_(True)
-    return normalized
+    transformed_tensor.requires_grad_(True)
+    return transformed_tensor
 
 def sigmoid_mask_batched(x: torch.Tensor, 
                         peak_pos: float = 0.5, 
@@ -50,8 +37,7 @@ def sigmoid_mask_batched(x: torch.Tensor,
     Input shape: (B, H, W)
     Output shape: (B, H, W)
     """
-    exp_term = torch.clamp(((x - peak_pos) / sharpness) ** 2, max=50)  # Clamp to prevent overflow
-    return 1 / torch.exp(exp_term)
+    return 1 / torch.exp(((x - peak_pos) / sharpness) ** 2)
 
 def mask_to_points_and_weights_batched(mask):
     """
@@ -72,9 +58,8 @@ def mask_to_points_and_weights_batched(mask):
     # Reshape to (B, H*W, 2)
     points = points.reshape(B, H*W, 2)
     
-    # Reshape weights to (B, H*W) and handle potential nan/inf values
+    # Reshape weights to (B, H*W)
     weights = mask.reshape(B, H*W)
-    weights = torch.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
     
     return points, weights
 
@@ -105,35 +90,31 @@ def weighted_samsons_distance_batched(points, coeffs, weights):
     algebraic_dist = A * x**2 + B * x * y + C * y**2 + D * x + E * y + F  # (B, N)
 
     # Compute the gradient magnitude normalization term
+    # Using the correct gradient computation
     grad_x = 2*A*x + B*y + D  # (B, N)
     grad_y = B*x + 2*C*y + E  # (B, N)
-    grad_magnitude = torch.sqrt(grad_x**2 + grad_y**2 + 1e-10)  # Add epsilon inside sqrt for stability
-    
-    # Handle potential division by zero
-    samsons_dist = torch.abs(algebraic_dist) / grad_magnitude
-    
-    # Clean any NaN/Inf values
-    samsons_dist = torch.nan_to_num(samsons_dist, nan=0.0, posinf=0.0, neginf=0.0)
+    grad_magnitude = torch.sqrt(grad_x**2 + grad_y**2)  # (B, N)
+
+    # Compute Samson's distance
+    samsons_dist = torch.abs(algebraic_dist) / (grad_magnitude + 1e-8)  # (B, N)
     
     # Apply weights
     weighted_samsons_dist = samsons_dist * weights  # (B, N)
 
     return weighted_samsons_dist
 
-def weighted_ellipse_fit_batched(points, weights, max_retries=3):
+def weighted_ellipse_fit_batched(points, weights):
     """
-    Batched version of weighted ellipse fit with robust handling of numerical issues.
+    Batched version of weighted ellipse fit.
     
     Parameters:
         points (Tensor): (B, N, 2) tensor of (x, y) points
         weights (Tensor): (B, N) tensor of weights
-        max_retries (int): Maximum number of retry attempts with adjusted weights
     
     Returns:
         params (Tensor): (B, 6) tensor of ellipse parameters [A, B, C, D, E, F]
     """
     B, N, _ = points.shape
-    device = points.device
     
     # Extract x and y coordinates
     x = points[..., 0]  # (B, N)
@@ -145,76 +126,16 @@ def weighted_ellipse_fit_batched(points, weights, max_retries=3):
     # Apply weights to design matrix
     D_weighted = D * weights.unsqueeze(-1)  # (B, N, 6)
     
-    # Check for nonfinite values and replace them
-    D_weighted = torch.nan_to_num(D_weighted, nan=0.0, posinf=0.0, neginf=0.0)
+    # Solve using SVD for each batch
+    # We can use torch.svd on the whole batch at once
+    U, S, V = torch.svd(D_weighted)
     
-    # Initialize default parameters if SVD fails completely
-    default_params = torch.zeros((B, 6), device=device)
-    default_params[:, 0] = 1.0  # A = 1
-    default_params[:, 2] = 1.0  # C = 1
+    # Get the last column of V for each batch
+    params = V[..., -1]  # (B, 6)
     
-    # Try SVD with progressively stronger regularization
-    params = None
-    success_mask = torch.zeros(B, dtype=torch.bool, device=device)
-    
-    for attempt in range(max_retries):
-        # Skip batches that already succeeded
-        batch_indices = torch.where(~success_mask)[0]
-        if len(batch_indices) == 0:
-            break
-            
-        # Select only the batch elements that haven't succeeded yet
-        D_to_process = D_weighted[batch_indices]
-        
-        try:
-            # Add small random noise to help with numerical stability (increases with each attempt)
-            noise_scale = 1e-7 * (10**attempt)
-            noisy_D = D_to_process + noise_scale * torch.randn_like(D_to_process)
-            
-            # Try to run SVD
-            U, S, V = torch.svd(noisy_D)
-            
-            # Get the last column of V for each batch
-            batch_params = V[..., -1]  # (Remaining_B, 6)
-            
-            # Normalize parameters
-            norm = torch.norm(batch_params, dim=-1, keepdim=True)
-            batch_params = batch_params / (norm + 1e-8)
-            
-            # Update the success mask for these batches
-            success_mask[batch_indices] = True
-            
-            # Initialize params tensor if not already done
-            if params is None:
-                params = default_params.clone()
-                
-            # Update params for the successful batches
-            params[batch_indices] = batch_params
-            
-        except RuntimeError as e:
-            if "algorithm failed to converge" in str(e).lower():
-                # Continue to the next attempt with stronger regularization
-                continue
-            else:
-                # For other errors, break and use what we have so far
-                break
-    
-    # If all attempts failed, return the default parameters
-    if params is None:
-        params = default_params
-    
-    # Force the parameters to be ellipses by ensuring A*C > B^2/4
-    A, B, C = params[:, 0], params[:, 1], params[:, 2]
-    B_sq_over_4 = B**2 / 4
-    condition = (A * C <= B_sq_over_4)
-    
-    # Adjust C where needed to ensure it's an ellipse
-    C_adjusted = torch.where(
-        condition,
-        B_sq_over_4 / (A + 1e-8) + 0.01,  # Make C slightly larger than needed
-        C
-    )
-    params[:, 2] = C_adjusted
+    # Normalize parameters
+    norm = torch.norm(params, dim=-1, keepdim=True)
+    params = params / (norm + 1e-8)
     
     return params
 
@@ -234,117 +155,79 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     # Extract parameters
     A, B, C, D, E, F = params.unbind(-1)
     
-    # Calculate ellipse parameters with numerical safeguards
+    # Calculate ellipse parameters
     denominator = 4*A*C - B**2
-    valid_denom = (torch.abs(denominator) > 1e-8).float()
-    safe_denominator = denominator + 1e-8
+    cx = (B*E - 2*C*D) / (denominator + 1e-8)
+    cy = (B*D - 2*A*E) / (denominator + 1e-8)
+    theta = 0.5 * torch.atan2(B, A - C)
     
-    # Compute center coordinates
-    cx = torch.where(
-        valid_denom > 0, 
-        (B*E - 2*C*D) / safe_denominator,
-        torch.zeros_like(denominator)
-    )
-    
-    cy = torch.where(
-        valid_denom > 0,
-        (B*D - 2*A*E) / safe_denominator,
-        torch.zeros_like(denominator)
-    )
-    
-    # Calculate orientation
-    theta = 0.5 * torch.atan2(B, A - C + 1e-10)
-    
-    # Calculate semi-axes lengths with stability checks
+    # Calculate semi-axes lengths
     cos_t = torch.cos(theta)
     sin_t = torch.sin(theta)
-    
     expr1 = A*cx**2 + C*cy**2 + B*cx*cy + D*cx + E*cy + F
+    a_squared = -2 * expr1 / (A*cos_t**2 + B*cos_t*sin_t + C*sin_t**2 + 1e-8)
+    b_squared = -2 * expr1 / (A*sin_t**2 - B*cos_t*sin_t + C*cos_t**2 + 1e-8)
     
-    # Compute denominators for a and b with stability checks
-    a_denom = A*cos_t**2 + B*cos_t*sin_t + C*sin_t**2
-    b_denom = A*sin_t**2 - B*cos_t*sin_t + C*cos_t**2
-    
-    # Ensure positive denominators (they should be positive for valid ellipses)
-    a_denom = torch.clamp(a_denom, min=1e-8)
-    b_denom = torch.clamp(b_denom, min=1e-8)
-    
-    # Calculate squared semi-axes
-    a_squared = -2 * expr1 / a_denom
-    b_squared = -2 * expr1 / b_denom
-    
-    # Handle negative values (which shouldn't occur for valid ellipses)
-    a_squared = torch.clamp(a_squared, min=1e-8)
-    b_squared = torch.clamp(b_squared, min=1e-8)
-    
-    # Calculate semi-axes
-    a = torch.sqrt(a_squared)
-    b = torch.sqrt(b_squared)
-    
-    # Ensure a ≥ b (by convention, a is the semi-major axis)
-    a_temp = torch.max(a, b)
-    b = torch.min(a, b)
-    a = a_temp
-    
+    a = torch.sqrt(torch.abs(a_squared))
+    b = torch.sqrt(torch.abs(b_squared))
+
     # Reshape a for proper broadcasting: (B,) -> (B, 1)
     a_expanded = a.unsqueeze(1)  # Now shape is (B, 1)
     
-    # Normalize by semi-major axis with stability check
+    # Normalize by semi-major axis
     normalized_dist = weighted_samsons_dist / (a_expanded + 1e-8)
     
-    # Calculate weighted mean with stability check
+    # Calculate weighted mean
     total_weighted_dist = torch.sum(normalized_dist * weights, dim=1)
-    total_weight = torch.sum(weights, dim=1) + 1e-8  # Avoid division by zero
-    mean_normalized_samsons_dist = total_weighted_dist / total_weight
+    total_weight = torch.sum(weights, dim=1)
+    mean_normalized_samsons_dist = total_weighted_dist / (total_weight + 1e-8)
     
-    # Clean any remaining NaN values from the final output
-    params_output = torch.stack([cx, cy, theta, a, b], dim=-1)
-    params_output = torch.nan_to_num(params_output, nan=0.0, posinf=0.0, neginf=0.0)
-    mean_normalized_samsons_dist = torch.nan_to_num(mean_normalized_samsons_dist, nan=1.0, posinf=1.0, neginf=1.0)
-    
-    return params_output, mean_normalized_samsons_dist
+    return torch.stack([cx, cy, theta, a, b], dim=-1), mean_normalized_samsons_dist
 
 def safe_ellipse_params_batched(image_tensor, peak_pos=0.5, sharpness=0.1):
     """
-    A wrapper around ellipse_params_batched that safely handles exceptions
-    without in-place operations that would break the autograd graph.
+    A wrapper around ellipse_params_batched that handles exceptions at the batch element level
+    and detaches gradients for problematic samples.
     """
-    try:
-        # Try the normal function first
-        return ellipse_params_batched(image_tensor, peak_pos, sharpness)
-    except Exception as e:
-        # Log the error for debugging purposes
-        print(f"Error in ellipse fitting: {str(e)}")
-        
-        # Create default values completely separate from the computation graph
-        B = image_tensor.shape[0]
-        device = image_tensor.device
-        
-        # Default ellipse parameters: centered circles with radius 10
-        default_params = torch.zeros((B, 5), device=device, requires_grad=False)
-        default_params = default_params.clone()  # Ensure a new tensor
-        
-        # Assign values using indexing, not in-place operations
-        params_list = []
-        for i in range(B):
-            # Create a new tensor for each batch element
-            params = torch.tensor([
-                float(image_tensor.shape[2]) / 2,  # cx = width/2
-                float(image_tensor.shape[1]) / 2,  # cy = height/2
-                0.0,                              # theta = 0
-                10.0,                             # a = 10
-                10.0                              # b = 10
-            ], device=device, requires_grad=False)
-            params_list.append(params)
-        
-        # Stack into batch
-        default_params = torch.stack(params_list)
-        
-        # Default confidence: low confidence (1.0 means poor fit)
-        default_confidence = torch.ones(B, device=device, requires_grad=False)
-        
-        # Return values completely detached from the computation graph
-        return default_params, default_confidence
+    B = image_tensor.shape[0]
+    device = image_tensor.device
+    
+    # Initialize output tensors
+    all_params = torch.zeros((B, 5), device=device)
+    all_confidence = torch.zeros(B, device=device)
+    
+    # Process each batch element individually
+    for i in range(B):
+        try:
+            # Process single image
+            single_image = image_tensor[i:i+1]  # Keep batch dimension
+            params, confidence = ellipse_params_batched(single_image, peak_pos, sharpness)
+            
+            # Check for NaN or Inf values
+            if (torch.isnan(params).any() or torch.isinf(params).any() or 
+                torch.isnan(confidence).any() or torch.isinf(confidence).any()):
+                raise ValueError("NaN or Inf values detected in output")
+                
+            all_params[i] = params[0]  # First (only) element of batch
+            all_confidence[i] = confidence[0]
+            
+        except Exception as e:
+            # Log the error for debugging
+            print(f"Error in ellipse fitting for batch element {i}: {str(e)}")
+            
+            # Default values (detached from computation graph)
+            default_params = torch.tensor([
+                image_tensor.shape[2] / 2,  # cx = width/2
+                image_tensor.shape[1] / 2,  # cy = height/2
+                0.0,                        # theta = 0
+                10.0,                       # a = 10
+                10.0                        # b = 10
+            ], device=device).detach()
+            
+            all_params[i] = default_params
+            all_confidence[i] = torch.tensor(1.0, device=device).detach()
+    
+    return all_params, all_confidence
 
 def ellipse_loss_batched(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
     """
