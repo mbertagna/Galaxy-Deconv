@@ -306,48 +306,45 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
 
 def safe_ellipse_params_batched(image_tensor, peak_pos=0.5, sharpness=0.1):
     """
-    A wrapper around ellipse_params_batched that handles exceptions at the batch element level
-    and detaches gradients for problematic samples.
+    A wrapper around ellipse_params_batched that safely handles exceptions
+    without in-place operations that would break the autograd graph.
     """
-    B = image_tensor.shape[0]
-    device = image_tensor.device
-    
-    # Initialize output tensors
-    all_params = torch.zeros((B, 5), device=device)
-    all_confidence = torch.zeros(B, device=device)
-    
-    # Process each batch element individually
-    for i in range(B):
-        try:
-            # Process single image
-            single_image = image_tensor[i:i+1]  # Keep batch dimension
-            params, confidence = ellipse_params_batched(single_image, peak_pos, sharpness)
-            
-            # Check for NaN or Inf values
-            if (torch.isnan(params).any() or torch.isinf(params).any() or 
-                torch.isnan(confidence).any() or torch.isinf(confidence).any()):
-                raise ValueError("NaN or Inf values detected in output")
-                
-            all_params[i] = params[0]  # First (only) element of batch
-            all_confidence[i] = confidence[0]
-            
-        except Exception as e:
-            # Log the error for debugging
-            print(f"Error in ellipse fitting for batch element {i}: {str(e)}")
-            
-            # Default values (detached from computation graph)
-            default_params = torch.tensor([
-                image_tensor.shape[2] / 2,  # cx = width/2
-                image_tensor.shape[1] / 2,  # cy = height/2
-                0.0,                        # theta = 0
-                10.0,                       # a = 10
-                10.0                        # b = 10
-            ], device=device).detach()
-            
-            all_params[i] = default_params
-            all_confidence[i] = torch.tensor(1.0, device=device).detach()
-    
-    return all_params, all_confidence
+    try:
+        # Try the normal function first
+        return ellipse_params_batched(image_tensor, peak_pos, sharpness)
+    except Exception as e:
+        # Log the error for debugging purposes
+        print(f"Error in ellipse fitting: {str(e)}")
+        
+        # Create default values completely separate from the computation graph
+        B = image_tensor.shape[0]
+        device = image_tensor.device
+        
+        # Default ellipse parameters: centered circles with radius 10
+        default_params = torch.zeros((B, 5), device=device, requires_grad=False)
+        default_params = default_params.clone()  # Ensure a new tensor
+        
+        # Assign values using indexing, not in-place operations
+        params_list = []
+        for i in range(B):
+            # Create a new tensor for each batch element
+            params = torch.tensor([
+                float(image_tensor.shape[2]) / 2,  # cx = width/2
+                float(image_tensor.shape[1]) / 2,  # cy = height/2
+                0.0,                              # theta = 0
+                10.0,                             # a = 10
+                10.0                              # b = 10
+            ], device=device, requires_grad=False)
+            params_list.append(params)
+        
+        # Stack into batch
+        default_params = torch.stack(params_list)
+        
+        # Default confidence: low confidence (1.0 means poor fit)
+        default_confidence = torch.ones(B, device=device, requires_grad=False)
+        
+        # Return values completely detached from the computation graph
+        return default_params, default_confidence
 
 def ellipse_loss_batched(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
     """
