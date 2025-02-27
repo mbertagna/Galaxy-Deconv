@@ -161,11 +161,11 @@ class MultiEllipseLoss(nn.Module):
         elif self.loss_aggregation == 'adaptive':
             # Weight inversely proportional to loss value (focus more on well-matched ellipses)
             weights = 1.0 / (individual_losses + 1e-8)
-            print(individual_losses)
+            # print(individual_losses)
             weights = weights / weights.sum()
-            print(weights)
+            # print(weights)
             final_loss = torch.sum(individual_losses * weights)
-            print(final_loss)
+            # print(final_loss)
             
         else:
             raise ValueError(f"Unsupported aggregation method: {self.loss_aggregation}")
