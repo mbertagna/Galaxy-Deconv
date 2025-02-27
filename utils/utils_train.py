@@ -98,6 +98,10 @@ class MultiEllipseLoss(nn.Module):
             self.angle_weight * normalized_angle_loss +
             self.axis_weight * normalized_axis_loss
         )
+
+        print('center:', self.center_weight * normalized_center_loss)
+        print(' angle:', self.angle_weight * normalized_angle_loss)
+        print('  axis:', self.axis_weight * normalized_axis_loss)
         
         return total_loss
     
