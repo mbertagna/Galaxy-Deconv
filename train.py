@@ -67,7 +67,7 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
             angle_weight=1.0,
             axis_weight=1.0,
             ellipse_weights=None,
-            loss_aggregation='mean'
+            loss_aggregation='adaptive'
         )
     
     optimizer = Adam(params=model.parameters(), lr = lr)
