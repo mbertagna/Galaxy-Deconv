@@ -250,9 +250,7 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     plt.tight_layout()
     return fig, axes
 
-import torch
-
-def ellipse_fit_metric(image_tensor, ellipse_params):
+def ellipse_fit_metric(image_tensor, ellipse_params, min_coverage_fraction=0.05):
     """
     Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
     Higher values indicate better fit (more intensity inside ellipse, less outside).
@@ -266,6 +264,9 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     ellipse_params : torch.Tensor
         Tensor of ellipse parameters with shape (B, 5) containing:
         [center_y, center_x, theta, a, b] for each image in the batch
+    min_coverage_fraction : float
+        Minimum fraction of the image that the ellipse should cover
+        to avoid penalty for being too small
     
     Returns:
     --------
@@ -334,6 +335,19 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     outside_density = outside_intensity / (outside_area + eps)
     contrast_ratio = inside_density / (outside_density + eps)
     
+    # Penalize ellipses that are too small (cover too few pixels)
+    # Calculate the coverage fraction of the image
+    coverage_fraction = inside_area / total_pixels
+    
+    # Scale factor to penalize tiny ellipses
+    # This approaches 1.0 as coverage increases beyond min_coverage_fraction
+    size_penalty = torch.sigmoid(
+        scale_factor * (coverage_fraction - min_coverage_fraction)
+    )
+    
+    # Apply the size penalty to the contrast ratio
+    adjusted_contrast_ratio = contrast_ratio * size_penalty
+    
     # Normalize to [0, 1]
-    normalized_score = contrast_ratio / (1.0 + contrast_ratio)
+    normalized_score = adjusted_contrast_ratio / (1.0 + adjusted_contrast_ratio)
     return normalized_score
