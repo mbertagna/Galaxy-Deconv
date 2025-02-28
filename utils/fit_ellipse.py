@@ -254,7 +254,7 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     """
     Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
     Higher values indicate better fit (more intensity inside ellipse, less outside).
-    Handles boundary conditions in a differentiable way with vectorized operations.
+    Handles boundary conditions naturally by only considering the visible part of the ellipse.
     
     Parameters:
     -----------
@@ -270,63 +270,48 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
         A tensor of shape (B,) with values between 0 and 1 representing 
         the normalized fit metric for each image
     """
-    # Ensure image is grayscale (B, H, W)
-    if image_tensor.dim() == 4:  # (B, C, H, W)
-        # Use RGB weights for grayscale conversion if needed
+    # Convert to grayscale if needed (B, H, W)
+    if image_tensor.dim() == 4:
         rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
         image = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
     else:
         image = image_tensor
     
-    # Extract batch size and image dimensions
     B, H, W = image.shape
-    device = image.device
-    dtype = image.dtype
+    device, dtype = image.device, image.dtype
     
-    # Extract ellipse parameters
-    cy = ellipse_params[:, 0].view(B, 1, 1)  # Reshape for broadcasting
+    # Extract ellipse parameters with broadcasting shapes
+    cy = ellipse_params[:, 0].view(B, 1, 1)
     cx = ellipse_params[:, 1].view(B, 1, 1)
     theta = ellipse_params[:, 2].view(B, 1, 1)
     a = ellipse_params[:, 3].view(B, 1, 1)
     b = ellipse_params[:, 4].view(B, 1, 1)
     
-    # Create coordinate grids for all images in batch
-    y_indices = torch.arange(H, dtype=dtype, device=device).view(1, H, 1).expand(B, H, W)
-    x_indices = torch.arange(W, dtype=dtype, device=device).view(1, 1, W).expand(B, H, W)
+    # Create coordinate grids
+    y_indices, x_indices = torch.meshgrid(
+        torch.arange(H, device=device, dtype=dtype),
+        torch.arange(W, device=device, dtype=dtype),
+        indexing='ij'
+    )
+    y_indices = y_indices.unsqueeze(0).expand(B, -1, -1)
+    x_indices = x_indices.unsqueeze(0).expand(B, -1, -1)
     
-    # Check if ellipse is likely to extend beyond boundaries
-    # Calculate a soft boundary factor (0 = fully inside, 1 = fully outside)
-    max_dim = torch.tensor(max(H, W), dtype=dtype, device=device)
-    
-    # Check distance from center to edges relative to semi-major axis
-    top_dist = cy
-    bottom_dist = H - 1 - cy
-    left_dist = cx
-    right_dist = W - 1 - cx
-    
-    # Compute a soft containment factor (1 = fully contained, 0 = fully outside)
-    # We use a sigmoid to create a smooth transition
-    margin = 2.0  # Controls smoothness of transition
-    min_dist = torch.min(torch.min(torch.min(top_dist, bottom_dist), left_dist), right_dist)
-    containment = torch.sigmoid((min_dist - max(a.max().item(), b.max().item())) / margin)
-    containment = containment.view(B, 1, 1)  # Reshape for broadcasting
-    
-    # Translate coordinates to center of ellipse
+    # Translate coordinates to ellipse center
     x_trans = x_indices - cx
     y_trans = y_indices - cy
     
-    # Rotate coordinates - vectorized across the batch
+    # Rotate coordinates
     cos_theta = torch.cos(theta)
     sin_theta = torch.sin(theta)
     x_rot = x_trans * cos_theta + y_trans * sin_theta
     y_rot = -x_trans * sin_theta + y_trans * cos_theta
     
-    # Create elliptical mask using smooth approximation for differentiability
+    # Compute smooth ellipse mask
     ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2
-    sharpness = torch.tensor(20.0, dtype=dtype, device=device)
+    sharpness = torch.tensor(20.0, device=device, dtype=dtype)
     ellipse_mask = torch.sigmoid(-sharpness * (ellipse_eq - 1.0))
     
-    # Calculate metrics vectorized across the batch
+    # Calculate intensity and areas
     intensity_inside = torch.sum(image * ellipse_mask, dim=(1, 2))
     area_inside = torch.sum(ellipse_mask, dim=(1, 2))
     
@@ -334,24 +319,13 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     intensity_outside = torch.sum(image * outside_mask, dim=(1, 2))
     area_outside = torch.sum(outside_mask, dim=(1, 2))
     
-    # Add small epsilon to prevent division by zero
-    eps = 1e-8
+    eps = 1e-8  # Avoid division by zero
     
-    # Calculate densities
+    # Compute density ratio
     inside_density = intensity_inside / (area_inside + eps)
     outside_density = intensity_outside / (area_outside + eps)
-    
-    # Calculate contrast ratio
     contrast_ratio = inside_density / (outside_density + eps)
     
-    # Normalize to range [0, 1]
+    # Normalize to [0, 1]
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
-    
-    # Apply the containment factor - smoothly reduce the score if ellipse extends beyond boundaries
-    # This is a soft way to "not consider it at all" as requested
-    final_score = normalized_score * containment.squeeze()
-    
-    # Ensure we're in [0, 1] range
-    final_score = torch.clamp(final_score, 0.0, 1.0)
-    
-    return final_score
+    return torch.clamp(normalized_score, 0.0, 1.0)
