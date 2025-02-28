@@ -24,17 +24,6 @@ def get_model_name(method, loss, filter='Laplacian', n_iters=8, llh='Gaussian', 
 class MultiEllipseLoss(nn.Module):
     def __init__(self, ellipse_levels=[0.3, 0.4, 0.5, 0.6, 0.7], center_weight=1.0, angle_weight=1.0, axis_weight=1.0, 
                  ellipse_weights=None, loss_aggregation='weighted_sum'):
-        """
-        Loss function that handles multiple ellipse predictions at different peak positions.
-        
-        Args:
-            ellipse_levels: List of peak position thresholds for ellipse detection
-            center_weight: Weight for center position loss
-            angle_weight: Weight for angle loss
-            axis_weight: Weight for axis length loss
-            ellipse_weights: Optional weights for different ellipses (None for equal weighting)
-            loss_aggregation: How to aggregate losses across ellipses ('weighted_sum', 'min', 'max')
-        """
         super(MultiEllipseLoss, self).__init__()
         self.ellipse_levels = ellipse_levels
         self.num_ellipses = len(ellipse_levels)
@@ -52,21 +41,11 @@ class MultiEllipseLoss(nn.Module):
         self.loss_aggregation = loss_aggregation
             
     def ellipse_loss_symmetric(self, output_params, target_params):
-        """
-        Symmetric version of ellipse loss using maximum-based normalization.
-        
-        Args:
-            output_params: Tensor of shape (B, 5) containing predicted ellipse parameters
-            target_params: Tensor of shape (B, 5) containing target ellipse parameters
-            
-        Returns:
-            Scalar loss value
-        """
         # Unpack parameters
         cx_out, cy_out, theta_out, a_out, b_out = output_params.unbind(-1)
         cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt = target_params.unbind(-1)
         
-        # Center loss
+        # Center loss - using MSE
         center_coords_out = torch.stack([cx_out, cy_out], dim=-1)
         center_coords_tgt = torch.stack([cx_tgt, cy_tgt], dim=-1)
         
@@ -80,16 +59,21 @@ class MultiEllipseLoss(nn.Module):
             center_coords_tgt / coord_scale.unsqueeze(-1)
         )
         
-        # Angle loss using vector representation (already symmetric)
+        # Angle loss using cosine similarity
         angle_vec_out = torch.stack([torch.cos(theta_out), torch.sin(theta_out)], dim=-1)
         angle_vec_tgt = torch.stack([torch.cos(theta_tgt), torch.sin(theta_tgt)], dim=-1)
-        normalized_angle_loss = 0.5 * F.mse_loss(angle_vec_out, angle_vec_tgt)
         
-        # Axis loss with symmetric normalization
+        # Compute cosine similarity (dot product of normalized vectors)
+        # Since vectors are already normalized (cos² + sin² = 1), no need to normalize again
+        cosine_sim = torch.sum(angle_vec_out * angle_vec_tgt, dim=-1)
+        # Convert to loss (1 - cos_sim ranges from 0 to 2)
+        normalized_angle_loss = torch.mean(1 - cosine_sim)
+        
+        # Axis loss with symmetric normalization using MSE instead of L1
         axis_scale = torch.maximum(out_max_axis, tgt_max_axis).unsqueeze(-1) + 1e-8
         normalized_axis_loss = 0.5 * (
-            F.l1_loss(a_out / axis_scale, a_tgt / axis_scale) +
-            F.l1_loss(b_out / axis_scale, b_tgt / axis_scale)
+            F.mse_loss(a_out / axis_scale, a_tgt / axis_scale) +
+            F.mse_loss(b_out / axis_scale, b_tgt / axis_scale)
         )
         
         # Combine losses
@@ -98,24 +82,10 @@ class MultiEllipseLoss(nn.Module):
             self.angle_weight * normalized_angle_loss +
             self.axis_weight * normalized_axis_loss
         )
-
-        # print('center:', self.center_weight * normalized_center_loss)
-        # print(' angle:', self.angle_weight * normalized_angle_loss)
-        # print('  axis:', self.axis_weight * normalized_axis_loss)
         
         return total_loss
     
     def forward(self, output, target):
-        """
-        Process output and target images to extract and compare ellipses at different levels.
-        
-        Args:
-            output: Tensor of shape (B, C, H, W) containing predicted images
-            target: Tensor of shape (B, C, H, W) containing target images
-            
-        Returns:
-            Scalar loss value aggregating all ellipses
-        """
         # Extract ellipse parameters for each level for both output and target
         output_params_list = []
         target_params_list = []
@@ -161,11 +131,8 @@ class MultiEllipseLoss(nn.Module):
         elif self.loss_aggregation == 'adaptive':
             # Weight inversely proportional to loss value (focus more on well-matched ellipses)
             weights = 1.0 / (individual_losses + 1e-8)
-            # print(individual_losses)
             weights = weights / weights.sum()
-            # print(weights)
             final_loss = torch.sum(individual_losses * weights)
-            # print(final_loss)
             
         else:
             raise ValueError(f"Unsupported aggregation method: {self.loss_aggregation}")
@@ -201,28 +168,6 @@ class MultiScaleLoss(nn.Module):
             loss += self.weights[i] * (primary_loss + self.aux_weight * aux_loss)
         
         return loss
-
-
-# class MultiScaleLoss(nn.Module):
-# 	def __init__(self, scales=3, norm='L1'):
-# 		super(MultiScaleLoss, self).__init__()
-# 		self.scales = scales
-# 		if norm == 'L1':
-# 			self.loss = nn.L1Loss()
-# 		if norm == 'L2':
-# 			self.loss = nn.MSELoss()
-
-# 		self.weights = torch.FloatTensor([1/(2**scale) for scale in range(self.scales)])
-# 		self.multiscales = [nn.AvgPool2d(2**scale, 2**scale) for scale in range(self.scales)]
-
-# 	def forward(self, output, target):
-# 		loss = 0
-# 		for i in range(self.scales):
-# 			output_i, target_i = self.multiscales[i](output), self.multiscales[i](target)
-# 			loss += self.weights[i]*self.loss(output_i, target_i)
-			
-# 		return loss
-
 
 class ShapeConstraint(nn.Module):
     def __init__(self, device, fov_pixels=48, gamma=1, n_shearlet=2):

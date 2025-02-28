@@ -4,11 +4,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 def transform_tensor_batched(tensor):
-    """
-    Transform a batch of tensors to match the format of the function that loads PNGs.
-    Input shape can be (B, C, H, W) or (B, H, W)
-    Output shape will be (B, H, W) with values in [0, 1] and gradients enabled.
-    """
     if tensor.dim() == 3:  # (B, H, W)
         transformed_tensor = tensor.clone()
     elif tensor.dim() == 4:  # (B, C, H, W)
@@ -32,19 +27,9 @@ def transform_tensor_batched(tensor):
 def sigmoid_mask_batched(x: torch.Tensor, 
                         peak_pos: float = 0.5, 
                         sharpness: float = 0.1) -> torch.Tensor:
-    """
-    Batched version of sigmoid mask.
-    Input shape: (B, H, W)
-    Output shape: (B, H, W)
-    """
     return 1 / torch.exp(((x - peak_pos) / sharpness) ** 2)
 
 def mask_to_points_and_weights_batched(mask):
-    """
-    Converts a batch of masked images into points with associated weights.
-    Input shape: (B, H, W)
-    Output shapes: points (B, H*W, 2), weights (B, H*W)
-    """
     B, H, W = mask.shape
     y_coords, x_coords = torch.meshgrid(torch.arange(H, device=mask.device), 
                                       torch.arange(W, device=mask.device))
@@ -64,18 +49,6 @@ def mask_to_points_and_weights_batched(mask):
     return points, weights
 
 def weighted_samsons_distance_batched(points, coeffs, weights):
-    """
-    Compute weighted Samson's distance for batches of points given batches of ellipse coefficients.
-    
-    Args:
-        points: Tensor of shape (B, N, 2), where B is batch size, N is number of points, 
-                and each point is (y, x) following your convention.
-        coeffs: Tensor of shape (B, 6), where coeffs = (A, B, C, D, E, F) for each batch.
-        weights: Tensor of shape (B, N), containing the weight for each point in each batch.
-    
-    Returns:
-        Tensor of shape (B, N) with weighted Samson's distances for each point in each batch.
-    """
     y, x = points[..., 0], points[..., 1]  # Using your coordinate convention
     
     # Extract coefficients for each batch (B, 6) -> (B, 1) for broadcasting
@@ -104,16 +77,6 @@ def weighted_samsons_distance_batched(points, coeffs, weights):
     return weighted_samsons_dist
 
 def weighted_ellipse_fit_batched(points, weights):
-    """
-    Batched version of weighted ellipse fit.
-    
-    Parameters:
-        points (Tensor): (B, N, 2) tensor of (x, y) points
-        weights (Tensor): (B, N) tensor of weights
-    
-    Returns:
-        params (Tensor): (B, 6) tensor of ellipse parameters [A, B, C, D, E, F]
-    """
     B, N, _ = points.shape
     
     # Extract x and y coordinates
@@ -140,13 +103,6 @@ def weighted_ellipse_fit_batched(points, weights):
     return params
 
 def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float = 0.1):
-    """
-    Compute ellipse parameters and confidence for a batch of images.
-    Input shape: (B, H, W)
-    Output shapes: 
-        params: (B, 5) containing [cx, cy, theta, a, b]
-        samsons_dist: (B,) containing confidence scores
-    """
     masked_image = sigmoid_mask_batched(image_tensor, peak_pos=peak_pos, sharpness=sharpness)
     points, weights = mask_to_points_and_weights_batched(masked_image)
     params = weighted_ellipse_fit_batched(points, weights)
@@ -185,10 +141,6 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     return torch.stack([cx, cy, theta, a, b], dim=-1), mean_normalized_samsons_dist
 
 def safe_ellipse_params_batched(image_tensor, peak_pos=0.5, sharpness=0.1):
-    """
-    A wrapper around ellipse_params_batched that handles exceptions at the batch element level
-    and detaches gradients for problematic samples.
-    """
     B = image_tensor.shape[0]
     device = image_tensor.device
     
@@ -229,62 +181,7 @@ def safe_ellipse_params_batched(image_tensor, peak_pos=0.5, sharpness=0.1):
     
     return all_params, all_confidence
 
-def ellipse_loss_batched(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
-    """
-    Batched version of ellipse loss.
-    Input shapes: (B, 5) for both output_params and target_params
-    Returns: scalar loss
-    """
-    # Unpack parameters
-    cx_out, cy_out, theta_out, a_out, b_out = output_params.unbind(-1)
-    cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt = target_params.unbind(-1)
-    
-    # Center loss
-    center_coords_out = torch.stack([cx_out, cy_out], dim=-1)
-    center_coords_tgt = torch.stack([cx_tgt, cy_tgt], dim=-1)
-    
-    # Normalize by maximum axis length per batch
-    coord_scale = torch.max(torch.stack([a_tgt, b_tgt], dim=-1), dim=-1)[0].unsqueeze(-1)
-    normalized_center_loss = F.mse_loss(
-        center_coords_out / (coord_scale.unsqueeze(-1) + 1e-8),
-        center_coords_tgt / (coord_scale.unsqueeze(-1) + 1e-8)
-    )
-    
-    # Angle loss using vector representation
-    angle_vec_out = torch.stack([torch.cos(theta_out), torch.sin(theta_out)], dim=-1)
-    angle_vec_tgt = torch.stack([torch.cos(theta_tgt), torch.sin(theta_tgt)], dim=-1)
-    normalized_angle_loss = 0.5 * F.mse_loss(angle_vec_out, angle_vec_tgt)
-    
-    # Axis loss
-    axis_scale = torch.max(torch.stack([a_tgt, b_tgt], dim=-1), dim=-1)[0].unsqueeze(-1)
-    normalized_axis_loss = 0.5 * (
-        F.l1_loss(a_out / (axis_scale + 1e-8), a_tgt / (axis_scale + 1e-8)) +
-        F.l1_loss(b_out / (axis_scale + 1e-8), b_tgt / (axis_scale + 1e-8))
-    )
-    
-    # Combine losses
-    total_loss = (
-        center_weight * normalized_center_loss +
-        angle_weight * normalized_angle_loss +
-        axis_weight * normalized_axis_loss
-    )
-    
-    return total_loss
-
-# def eloss(output_batch, target_batch):
-#     transformed_output = transform_tensor_batched(output_batch)
-#     transformed_target = transform_tensor_batched(target_batch)
-    
-#     output_params, _ = ellipse_params_batched(transformed_output)
-#     target_params, _ = ellipse_params_batched(transformed_target)
-    
-#     return ellipse_loss_batched(output_params, target_params)
-
 def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
-    """
-    Plot a batch of images with their fitted ellipses overlaid.
-    Always shows a 40x40 unit view regardless of ellipse size.
-    """
     # Convert images to numpy and ensure they're grayscale
     if images.dim() == 4:  # (B, C, H, W)
         images = images.mean(dim=1)
@@ -352,168 +249,3 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     
     plt.tight_layout()
     return fig, axes
-
-# import torch
-
-# def transform_tensor(tensor):
-#     """
-#     Transform a loaded tensor to match the format of the function that loads PNGs.
-#     Ensures shape (H, W) with values in [0, 1] and gradients enabled.
-#     """
-#     print(tensor.shape)
-#     transformed_tensor = tensor
-#     if tensor.dim() == 2:  # Already grayscale
-#         transformed_tensor = tensor.clone()
-#     elif tensor.dim() == 3 and tensor.shape[0] in {1, 3}:  # Convert to single channel
-#         transformed_tensor = tensor.mean(dim=0)  # Convert to grayscale
-    
-#     # Normalize if needed
-#     if transformed_tensor.max() > 1.0:
-#         transformed_tensor = transformed_tensor / 255.0
-
-#     # Min-max normalization
-#     min_val, max_val = transformed_tensor.min(), transformed_tensor.max()
-#     if max_val > min_val:  # Avoid division by zero
-#         transformed_tensor = (transformed_tensor - min_val) / (max_val - min_val)
-    
-#     transformed_tensor.requires_grad_(True)
-#     return transformed_tensor
-
-# def sigmoid_mask(x: torch.Tensor, 
-#                    peak_pos: float = 0.4, 
-#                    sharpness: float = 20.0) -> torch.Tensor:
-#     """
-#     Differentiable nonlinear transformation for galaxy edge processing.
-#     Maintains low values, amplifies mid-range, suppresses highs.
-#     """
-#     scaled_x = sharpness * (x - peak_pos)
-#     return x * torch.sigmoid(scaled_x) * (1 - torch.sigmoid(scaled_x - 2.0))
-
-# def mask_to_points_and_weights_full(mask):
-#     """
-#     Converts a masked image tensor into points with associated weights.
-#     """
-#     H, W = mask.shape
-#     x_coords, y_coords = torch.meshgrid(torch.arange(H), torch.arange(W))
-#     points = torch.stack((x_coords.flatten(), y_coords.flatten()), dim=1).float()
-#     weights = mask.flatten()
-#     return points, weights
-
-# def weighted_ellipse_fit(points, weights):
-#     """
-#     Fit an ellipse to weighted points using SVD, avoiding in-place operations.
-    
-#     Parameters:
-#         points (Tensor): Nx2 tensor of (x, y) points
-#         weights (Tensor): N-element tensor of weights
-    
-#     Returns:
-#         params (Tensor): The ellipse parameters [A, B, C, D, E, F]
-#     """
-#     # Extract x and y coordinates
-#     x = points[:, 0]
-#     y = points[:, 1]
-    
-#     # Construct the design matrix
-#     D = torch.stack((x**2, x*y, y**2, x, y, torch.ones_like(x)), dim=1)
-    
-#     # Create diagonal weight matrix and apply weights
-#     W = torch.diag_embed(weights)
-#     D_weighted = torch.matmul(W, D)
-    
-#     # Solve using SVD
-#     U, S, V = torch.svd(D_weighted)
-#     params = V[:, -1]
-    
-#     # Normalize parameters WITHOUT in-place operation
-#     norm = torch.norm(params)
-#     params = params / (norm + 1e-8)  # Add small epsilon for numerical stability
-    
-#     return params
-
-# def ellipse_params(image_tensor):
-#     masked_image = sigmoid_mask(image_tensor)
-#     points, weights = mask_to_points_and_weights_full(masked_image)
-#     params = weighted_ellipse_fit(points, weights)
-
-#     # Assuming params are already tensors, if not, convert them in a differentiable manner
-#     A, B, C, D, E, F = [param.to(image_tensor.device) for param in params]
-
-#     # Calculate ellipse center
-#     denominator = 4*A*C - B**2
-#     cx = (B*E - 2*C*D) / denominator
-#     cy = (B*D - 2*A*E) / denominator
-    
-#     # Calculate rotation angle and semi-axes
-#     theta = 0.5 * torch.atan2(B, A - C)
-#     cos_t = torch.cos(theta)
-#     sin_t = torch.sin(theta)
-    
-#     # Calculate semi-axes lengths
-#     a_squared = -2 * (A*cx**2 + C*cy**2 + B*cx*cy + D*cx + E*cy + F) / \
-#                 (A*cos_t**2 + B*cos_t*sin_t + C*sin_t**2)
-#     b_squared = -2 * (A*cx**2 + C*cy**2 + B*cx*cy + D*cx + E*cy + F) / \
-#                 (A*sin_t**2 - B*cos_t*sin_t + C*cos_t**2)
-    
-#     a = torch.sqrt(torch.abs(a_squared))
-#     b = torch.sqrt(torch.abs(b_squared))
-
-#     return torch.stack([cx, cy, theta, a, b])
-
-# def ellipse_loss(output_params, target_params, center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
-#     """
-#     Computes normalized loss between output and target ellipse parameters where each
-#     component (center, angle, axes) contributes equally to the total loss.
-    
-#     Args:
-#     - output_params: (cx_out, cy_out, theta_out, a_out, b_out)
-#     - target_params: (cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt)
-#     - center_weight: Weight for center loss
-#     - angle_weight: Weight for angle loss
-#     - axis_weight: Weight for axis loss
-    
-#     Returns:
-#     - total_loss: Combined normalized loss
-#     """
-#     # Unpack parameters
-#     cx_out, cy_out, theta_out, a_out, b_out = output_params
-#     cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt = target_params
-    
-#     # Center loss (normalized by image size)
-#     center_coords_out = torch.stack([cx_out, cy_out])
-#     center_coords_tgt = torch.stack([cx_tgt, cy_tgt])
-    
-#     # Normalize center coordinates by the maximum of target axes
-#     coord_scale = torch.max(torch.stack([a_tgt, b_tgt]))
-#     normalized_center_loss = F.mse_loss(
-#         center_coords_out / (coord_scale + 1e-8),
-#         center_coords_tgt / (coord_scale + 1e-8)
-#     )
-    
-#     # Angle loss (normalized to be between 0 and 1)
-#     # Convert angles to normalized direction vectors to handle periodicity
-#     def angle_to_vector(theta):
-#         return torch.stack([torch.cos(theta), torch.sin(theta)])
-    
-#     angle_vec_out = angle_to_vector(theta_out)
-#     angle_vec_tgt = angle_to_vector(theta_tgt)
-#     normalized_angle_loss = 0.5 * torch.nn.functional.mse_loss(angle_vec_out, angle_vec_tgt)
-    
-#     # Axis loss (normalized by the larger target axis)
-#     axis_scale = torch.max(torch.stack([a_tgt, b_tgt]))
-#     normalized_axis_loss = 0.5 * (
-#         torch.nn.functional.l1_loss(a_out / (axis_scale + 1e-8), a_tgt / (axis_scale + 1e-8)) +
-#         torch.nn.functional.l1_loss(b_out / (axis_scale + 1e-8), b_tgt / (axis_scale + 1e-8))
-#     )
-    
-#     # Combine losses with weights
-#     total_loss = (
-#         center_weight * normalized_center_loss +
-#         angle_weight * normalized_angle_loss +
-#         axis_weight * normalized_axis_loss
-#     )
-
-#     return total_loss
-
-# def eloss(output_i, target_i):
-#     return ellipse_loss(ellipse_params(transform_tensor(output_i)), ellipse_params(transform_tensor(target_i)))
