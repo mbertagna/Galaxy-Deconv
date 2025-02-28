@@ -249,14 +249,11 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     
     plt.tight_layout()
     return fig, axes
-import torch
 
-def intensity_concentration_from_params(image_tensor, ellipse_params):
+def ellipse_fit_metric(image_tensor, ellipse_params):
     """
-    Computes the concentration of intensity within elliptical areas defined by parameters.
-    
-    The function returns a value between 0 and 1 for each image in the batch,
-    where higher values indicate more intensity is concentrated in a smaller elliptical area.
+    Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
+    Higher values indicate better fit (more intensity inside ellipse, less outside).
     
     Parameters:
     -----------
@@ -270,7 +267,7 @@ def intensity_concentration_from_params(image_tensor, ellipse_params):
     --------
     torch.Tensor
         A tensor of shape (B,) with values between 0 and 1 representing 
-        the concentration of intensity for each image
+        the normalized fit metric for each image
     """
     # Ensure image is grayscale (B, H, W)
     if image_tensor.dim() == 4:  # (B, C, H, W)
@@ -286,7 +283,7 @@ def intensity_concentration_from_params(image_tensor, ellipse_params):
     dtype = image.dtype
     
     # Extract ellipse parameters
-    cy = ellipse_params[:, 0]  # center_y (note: your function outputs y first, then x)
+    cy = ellipse_params[:, 0]  # center_y (first parameter in your coordinate system)
     cx = ellipse_params[:, 1]  # center_x
     theta = ellipse_params[:, 2]  # rotation angle
     a = ellipse_params[:, 3]  # semi-major axis
@@ -301,159 +298,54 @@ def intensity_concentration_from_params(image_tensor, ellipse_params):
     y_grid = y_grid.unsqueeze(0).expand(B, H, W)
     x_grid = x_grid.unsqueeze(0).expand(B, H, W)
     
-    # For each batch element, compute the elliptical mask
-    results = []
+    # Prepare results tensor
+    results = torch.zeros(B, dtype=dtype, device=device)
+    
+    # Total image area
+    total_area = H * W
     
     for i in range(B):
         # Translate coordinates to center of ellipse
         x_trans = x_grid[i] - cx[i]
         y_trans = y_grid[i] - cy[i]
         
-        # Rotate coordinates if needed
-        if theta[i] != 0:
-            cos_theta = torch.cos(theta[i])
-            sin_theta = torch.sin(theta[i])
-            x_rot = x_trans * cos_theta + y_trans * sin_theta
-            y_rot = -x_trans * sin_theta + y_trans * cos_theta
-        else:
-            x_rot = x_trans
-            y_rot = y_trans
+        # Rotate coordinates
+        cos_theta = torch.cos(theta[i])
+        sin_theta = torch.sin(theta[i])
+        x_rot = x_trans * cos_theta + y_trans * sin_theta
+        y_rot = -x_trans * sin_theta + y_trans * cos_theta
         
-        # Create soft elliptical mask using sigmoid for differentiability
+        # Create elliptical mask using smooth approximation for differentiability
         ellipse_eq = (x_rot / a[i])**2 + (y_rot / b[i])**2
-        sharpness = torch.tensor(20.0, dtype=dtype, device=device)
-        soft_mask = torch.sigmoid(-sharpness * (ellipse_eq - 1))
+        sharpness = torch.tensor(20.0, dtype=dtype, device=device)  # Adjust for desired edge sharpness
+        ellipse_mask = torch.sigmoid(-sharpness * (ellipse_eq - 1.0))
         
-        # Apply soft mask to image
-        masked_image = image[i] * soft_mask
+        # Sum of intensity inside ellipse (using soft mask)
+        intensity_inside = torch.sum(image[i] * ellipse_mask)
         
-        # Calculate total intensity within the mask
-        total_intensity = torch.sum(masked_image)
+        # Area of ellipse (sum of mask values for soft boundary)
+        area_inside = torch.sum(ellipse_mask)
         
-        # Calculate effective number of pixels (accounting for soft boundary)
-        num_pixels = torch.sum(soft_mask)
+        # Sum of intensity outside ellipse
+        outside_mask = 1.0 - ellipse_mask
+        intensity_outside = torch.sum(image[i] * outside_mask)
         
-        # Avoid division by zero
-        eps = torch.tensor(1e-6, dtype=dtype, device=device)
-        num_pixels = torch.max(num_pixels, eps)
+        # Area outside ellipse
+        area_outside = torch.sum(outside_mask)
         
-        # Calculate average intensity in the mask
-        avg_intensity = total_intensity / num_pixels
+        # Add small epsilon to prevent division by zero
+        eps = 1e-8
         
-        # Ellipse area in pixels (analytical)
-        ellipse_area = torch.pi * a[i] * b[i]
-        ellipse_area = torch.max(ellipse_area, eps)
+        # Calculate densities
+        inside_density = intensity_inside / (area_inside + eps)
+        outside_density = intensity_outside / (area_outside + eps)
         
-        # Calculate the normalized concentration
-        raw_concentration = avg_intensity * torch.sqrt(total_intensity) / torch.sqrt(ellipse_area)
+        # Calculate contrast ratio
+        contrast_ratio = inside_density / (outside_density + eps)
         
-        # Apply sigmoid to map to 0-1 range in a differentiable way
-        concentration = torch.sigmoid(raw_concentration)
+        # Normalize to range [0, 1]
+        normalized_score = contrast_ratio / (1.0 + contrast_ratio)
         
-        results.append(concentration)
+        results[i] = normalized_score
     
-    # Stack results into a single tensor
-    return torch.stack(results)
-
-def intensity_concentration_batched(image_tensor, ellipse_params):
-    """
-    A fully vectorized implementation of intensity concentration within elliptical areas.
-    
-    Computes the ratio of intensity inside ellipses relative to the number of pixels,
-    returning a value between 0 and 1 for each image in the batch. Higher values
-    indicate more intensity concentrated in a smaller area.
-    
-    Parameters:
-    -----------
-    image_tensor : torch.Tensor
-        The input image tensor with shape (B, H, W) or (B, C, H, W)
-    ellipse_params : torch.Tensor
-        Tensor of ellipse parameters with shape (B, 5) containing:
-        [center_y, center_x, theta, a, b] for each image in the batch
-    
-    Returns:
-    --------
-    torch.Tensor
-        A tensor of shape (B,) with values between 0 and 1 representing 
-        the concentration of intensity for each image
-    """
-    # Ensure image is grayscale (B, H, W)
-    if image_tensor.dim() == 4:  # (B, C, H, W)
-        # Use RGB weights for grayscale conversion if needed
-        rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
-        image = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
-    else:
-        image = image_tensor
-    
-    # Extract batch size and image dimensions
-    B, H, W = image.shape
-    device = image.device
-    dtype = image.dtype
-    
-    # Create coordinate grids for all images in batch
-    y_indices = torch.arange(H, dtype=dtype, device=device)
-    x_indices = torch.arange(W, dtype=dtype, device=device)
-    y_grid, x_grid = torch.meshgrid(y_indices, x_indices, indexing='ij')
-    
-    # Extract ellipse parameters and reshape for broadcasting
-    # Input is [cy, cx, theta, a, b] with shape (B, 5)
-    cy = ellipse_params[:, 0].view(B, 1, 1)  # (B, 1, 1)
-    cx = ellipse_params[:, 1].view(B, 1, 1)
-    theta = ellipse_params[:, 2].view(B, 1, 1)
-    a = ellipse_params[:, 3].view(B, 1, 1)
-    b = ellipse_params[:, 4].view(B, 1, 1)
-    
-    # Expand coordinate grids to batch dimension (B, H, W)
-    x_grid = x_grid.expand(B, H, W)
-    y_grid = y_grid.expand(B, H, W)
-    
-    # Translate coordinates to center of ellipse for each image
-    x_trans = x_grid - cx  # (B, H, W)
-    y_trans = y_grid - cy  # (B, H, W)
-    
-    # Compute rotation components
-    cos_theta = torch.cos(theta)  # (B, 1, 1)
-    sin_theta = torch.sin(theta)  # (B, 1, 1)
-    
-    # Rotate coordinates
-    x_rot = x_trans * cos_theta + y_trans * sin_theta  # (B, H, W)
-    y_rot = -x_trans * sin_theta + y_trans * cos_theta  # (B, H, W)
-    
-    # Compute ellipse equation (quadratic form)
-    ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2  # (B, H, W)
-    
-    # Create soft elliptical mask with sigmoid
-    sharpness = torch.tensor(20.0, dtype=dtype, device=device)
-    soft_mask = torch.sigmoid(-sharpness * (ellipse_eq - 1))  # (B, H, W)
-    
-    # Apply mask to images
-    masked_image = image * soft_mask  # (B, H, W)
-    
-    # Calculate total intensity within the mask for each image
-    total_intensity = torch.sum(masked_image, dim=(1, 2))  # (B,)
-    
-    # Calculate effective number of pixels in mask for each image
-    num_pixels = torch.sum(soft_mask, dim=(1, 2))  # (B,)
-    
-    # Avoid division by zero
-    eps = torch.tensor(1e-6, dtype=dtype, device=device)
-    num_pixels = torch.clamp(num_pixels, min=eps)  # (B,)
-    
-    # Calculate average intensity in each mask
-    avg_intensity = total_intensity / num_pixels  # (B,)
-    
-    # Calculate ellipse area (analytical)
-    ellipse_area = torch.pi * ellipse_params[:, 3] * ellipse_params[:, 4]  # (B,)
-    ellipse_area = torch.clamp(ellipse_area, min=eps)  # (B,)
-    
-    # Calculate concentration metric
-    # This increases with:
-    # - Higher average intensity inside the ellipse
-    # - Higher total intensity inside the ellipse
-    # - Smaller ellipse area (fewer pixels)
-    raw_concentration = avg_intensity * torch.sqrt(total_intensity) / torch.sqrt(ellipse_area)  # (B,)
-    
-    # Map to [0,1] range using sigmoid for differentiability
-    concentration = torch.sigmoid(raw_concentration)  # (B,)
-    
-    return concentration
+    return results
