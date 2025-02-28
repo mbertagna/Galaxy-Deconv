@@ -250,12 +250,11 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     plt.tight_layout()
     return fig, axes
 
-def ellipse_fit_metric(image_tensor, ellipse_params, min_coverage_fraction=0.05):
+def ellipse_fit_metric(image_tensor, ellipse_params):
     """
     Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
     Higher values indicate better fit (more intensity inside ellipse, less outside).
-    Prevents tiny ellipses from getting unfairly high scores by considering 
-    coverage fraction and penalizing extremely small ellipses.
+    Uses a parameterless, differentiable binary-like mask for the ellipse boundary.
     
     Parameters:
     -----------
@@ -264,9 +263,6 @@ def ellipse_fit_metric(image_tensor, ellipse_params, min_coverage_fraction=0.05)
     ellipse_params : torch.Tensor
         Tensor of ellipse parameters with shape (B, 5) containing:
         [center_y, center_x, theta, a, b] for each image in the batch
-    min_coverage_fraction : float
-        Minimum fraction of the image that the ellipse should cover
-        to avoid penalty for being too small
     
     Returns:
     --------
@@ -283,7 +279,6 @@ def ellipse_fit_metric(image_tensor, ellipse_params, min_coverage_fraction=0.05)
     
     B, H, W = image.shape
     device, dtype = image.device, image.dtype
-    total_pixels = H * W
     
     # Extract ellipse parameters with broadcasting shapes
     cy = ellipse_params[:, 0].view(B, 1, 1)
@@ -314,11 +309,8 @@ def ellipse_fit_metric(image_tensor, ellipse_params, min_coverage_fraction=0.05)
     # Compute ellipse equation value for each pixel
     ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2
     
-    # Create binary-like mask that's still differentiable
-    # Using a steeper sigmoid gives more of a binary-like mask
-    # which better represents whole pixels
-    scale_factor = torch.tensor(50.0, device=device, dtype=dtype)
-    inside_mask = torch.sigmoid(scale_factor * (1.0 - ellipse_eq))
+    # Create binary-like mask using torch.where (still differentiable)
+    inside_mask = torch.where(ellipse_eq <= 1.0, 1.0, 0.0)
     outside_mask = 1.0 - inside_mask
     
     # Calculate total intensity and area
@@ -335,19 +327,6 @@ def ellipse_fit_metric(image_tensor, ellipse_params, min_coverage_fraction=0.05)
     outside_density = outside_intensity / (outside_area + eps)
     contrast_ratio = inside_density / (outside_density + eps)
     
-    # Penalize ellipses that are too small (cover too few pixels)
-    # Calculate the coverage fraction of the image
-    coverage_fraction = inside_area / total_pixels
-    
-    # Scale factor to penalize tiny ellipses
-    # This approaches 1.0 as coverage increases beyond min_coverage_fraction
-    size_penalty = torch.sigmoid(
-        scale_factor * (coverage_fraction - min_coverage_fraction)
-    )
-    
-    # Apply the size penalty to the contrast ratio
-    adjusted_contrast_ratio = contrast_ratio * size_penalty
-    
     # Normalize to [0, 1]
-    normalized_score = adjusted_contrast_ratio / (1.0 + adjusted_contrast_ratio)
+    normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
