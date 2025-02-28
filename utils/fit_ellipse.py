@@ -254,6 +254,7 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     """
     Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
     Higher values indicate better fit (more intensity inside ellipse, less outside).
+    Handles boundary conditions in a differentiable way with vectorized operations.
     
     Parameters:
     -----------
@@ -283,69 +284,74 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     dtype = image.dtype
     
     # Extract ellipse parameters
-    cy = ellipse_params[:, 0]  # center_y (first parameter in your coordinate system)
-    cx = ellipse_params[:, 1]  # center_x
-    theta = ellipse_params[:, 2]  # rotation angle
-    a = ellipse_params[:, 3]  # semi-major axis
-    b = ellipse_params[:, 4]  # semi-minor axis
+    cy = ellipse_params[:, 0].view(B, 1, 1)  # Reshape for broadcasting
+    cx = ellipse_params[:, 1].view(B, 1, 1)
+    theta = ellipse_params[:, 2].view(B, 1, 1)
+    a = ellipse_params[:, 3].view(B, 1, 1)
+    b = ellipse_params[:, 4].view(B, 1, 1)
     
     # Create coordinate grids for all images in batch
-    y_indices = torch.arange(H, dtype=dtype, device=device)
-    x_indices = torch.arange(W, dtype=dtype, device=device)
-    y_grid, x_grid = torch.meshgrid(y_indices, x_indices, indexing='ij')
+    y_indices = torch.arange(H, dtype=dtype, device=device).view(1, H, 1).expand(B, H, W)
+    x_indices = torch.arange(W, dtype=dtype, device=device).view(1, 1, W).expand(B, H, W)
     
-    # Expand grids to match batch dimension (B, H, W)
-    y_grid = y_grid.unsqueeze(0).expand(B, H, W)
-    x_grid = x_grid.unsqueeze(0).expand(B, H, W)
+    # Check if ellipse is likely to extend beyond boundaries
+    # Calculate a soft boundary factor (0 = fully inside, 1 = fully outside)
+    max_dim = torch.tensor(max(H, W), dtype=dtype, device=device)
     
-    # Prepare results tensor
-    results = torch.zeros(B, dtype=dtype, device=device)
+    # Check distance from center to edges relative to semi-major axis
+    top_dist = cy
+    bottom_dist = H - 1 - cy
+    left_dist = cx
+    right_dist = W - 1 - cx
     
-    # Total image area
-    total_area = H * W
+    # Compute a soft containment factor (1 = fully contained, 0 = fully outside)
+    # We use a sigmoid to create a smooth transition
+    margin = 2.0  # Controls smoothness of transition
+    min_dist = torch.min(torch.min(torch.min(top_dist, bottom_dist), left_dist), right_dist)
+    containment = torch.sigmoid((min_dist - max(a.max().item(), b.max().item())) / margin)
+    containment = containment.view(B, 1, 1)  # Reshape for broadcasting
     
-    for i in range(B):
-        # Translate coordinates to center of ellipse
-        x_trans = x_grid[i] - cx[i]
-        y_trans = y_grid[i] - cy[i]
-        
-        # Rotate coordinates
-        cos_theta = torch.cos(theta[i])
-        sin_theta = torch.sin(theta[i])
-        x_rot = x_trans * cos_theta + y_trans * sin_theta
-        y_rot = -x_trans * sin_theta + y_trans * cos_theta
-        
-        # Create elliptical mask using smooth approximation for differentiability
-        ellipse_eq = (x_rot / a[i])**2 + (y_rot / b[i])**2
-        sharpness = torch.tensor(20.0, dtype=dtype, device=device)  # Adjust for desired edge sharpness
-        ellipse_mask = torch.sigmoid(-sharpness * (ellipse_eq - 1.0))
-        
-        # Sum of intensity inside ellipse (using soft mask)
-        intensity_inside = torch.sum(image[i] * ellipse_mask)
-        
-        # Area of ellipse (sum of mask values for soft boundary)
-        area_inside = torch.sum(ellipse_mask)
-        
-        # Sum of intensity outside ellipse
-        outside_mask = 1.0 - ellipse_mask
-        intensity_outside = torch.sum(image[i] * outside_mask)
-        
-        # Area outside ellipse
-        area_outside = torch.sum(outside_mask)
-        
-        # Add small epsilon to prevent division by zero
-        eps = 1e-8
-        
-        # Calculate densities
-        inside_density = intensity_inside / (area_inside + eps)
-        outside_density = intensity_outside / (area_outside + eps)
-        
-        # Calculate contrast ratio
-        contrast_ratio = inside_density / (outside_density + eps)
-        
-        # Normalize to range [0, 1]
-        normalized_score = contrast_ratio / (1.0 + contrast_ratio)
-        
-        results[i] = normalized_score
+    # Translate coordinates to center of ellipse
+    x_trans = x_indices - cx
+    y_trans = y_indices - cy
     
-    return results
+    # Rotate coordinates - vectorized across the batch
+    cos_theta = torch.cos(theta)
+    sin_theta = torch.sin(theta)
+    x_rot = x_trans * cos_theta + y_trans * sin_theta
+    y_rot = -x_trans * sin_theta + y_trans * cos_theta
+    
+    # Create elliptical mask using smooth approximation for differentiability
+    ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2
+    sharpness = torch.tensor(20.0, dtype=dtype, device=device)
+    ellipse_mask = torch.sigmoid(-sharpness * (ellipse_eq - 1.0))
+    
+    # Calculate metrics vectorized across the batch
+    intensity_inside = torch.sum(image * ellipse_mask, dim=(1, 2))
+    area_inside = torch.sum(ellipse_mask, dim=(1, 2))
+    
+    outside_mask = 1.0 - ellipse_mask
+    intensity_outside = torch.sum(image * outside_mask, dim=(1, 2))
+    area_outside = torch.sum(outside_mask, dim=(1, 2))
+    
+    # Add small epsilon to prevent division by zero
+    eps = 1e-8
+    
+    # Calculate densities
+    inside_density = intensity_inside / (area_inside + eps)
+    outside_density = intensity_outside / (area_outside + eps)
+    
+    # Calculate contrast ratio
+    contrast_ratio = inside_density / (outside_density + eps)
+    
+    # Normalize to range [0, 1]
+    normalized_score = contrast_ratio / (1.0 + contrast_ratio)
+    
+    # Apply the containment factor - smoothly reduce the score if ellipse extends beyond boundaries
+    # This is a soft way to "not consider it at all" as requested
+    final_score = normalized_score * containment.squeeze()
+    
+    # Ensure we're in [0, 1] range
+    final_score = torch.clamp(final_score, 0.0, 1.0)
+    
+    return final_score
