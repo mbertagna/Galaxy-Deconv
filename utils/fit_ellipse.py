@@ -249,13 +249,13 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     
     plt.tight_layout()
     return fig, axes
+import torch
 
 def ellipse_fit_metric(image_tensor, ellipse_params):
     """
     Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
     Higher values indicate better fit (more intensity inside ellipse, less outside).
-    Uses distance from boundary weighting for pixels inside the ellipse.
-    Maintains differentiability and handles ellipses extending beyond image boundaries.
+    Uses a differentiable mask with a sharp transition at the ellipse boundary.
     
     Parameters:
     -----------
@@ -310,31 +310,30 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     # Compute ellipse equation value for each pixel
     ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2
     
-    # Create differentiable inside mask using smooth step function
-    # Smooth step transitions from 1 (inside) to 0 (outside) at ellipse_eq = 1
-    t = torch.clamp(1.0 - ellipse_eq, 0.0, 1.0)  # Linear transition in narrow range around boundary
-    inside_mask = t * t * (3.0 - 2.0 * t)  # Smooth cubic interpolation (smoothstep)
+    # Create a sharp but differentiable mask using sigmoid
+    # Scale factor controls the sharpness of the transition
+    # Using log(3)/0.05 ≈ 22 gives a transition width of ~0.05 in normalized distance
+    scale_factor = torch.tensor(22.0, device=device, dtype=dtype)
+    inside_mask = torch.sigmoid(scale_factor * (1.0 - ellipse_eq))
     outside_mask = 1.0 - inside_mask
     
-    # Calculate distance weighting for inside pixels - weighted by distance from boundary
-    # This gives higher weight to pixels closer to center (where ellipse_eq is smaller)
-    distance_weight = torch.clamp(1.0 - ellipse_eq, 0.0, 1.0)  # Linear weight, max 1 at center
+    # Calculate total intensity and area without distance weighting
+    inside_intensity = torch.sum(image * inside_mask, dim=(1, 2))
+    inside_area = torch.sum(inside_mask, dim=(1, 2))
     
-    # Apply distance weighting to inside pixels
-    weighted_inside_intensity = torch.sum(image * inside_mask * distance_weight, dim=(1, 2))
-    weighted_inside_area = torch.sum(inside_mask * distance_weight, dim=(1, 2))
-    
-    # Calculate outside intensity and area (no weighting)
     outside_intensity = torch.sum(image * outside_mask, dim=(1, 2))
     outside_area = torch.sum(outside_mask, dim=(1, 2))
     
     eps = 1e-8  # Avoid division by zero
     
-    # Compute density ratio with weighted inside values
-    inside_density = weighted_inside_intensity / (weighted_inside_area + eps)
+    # Compute density ratio
+    inside_density = inside_intensity / (inside_area + eps)
     outside_density = outside_intensity / (outside_area + eps)
+    
+    # Penalize for intensity outside the ellipse
+    # This formulation ensures that high outside intensity reduces the score
     contrast_ratio = inside_density / (outside_density + eps)
     
     # Normalize to [0, 1]
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
-    return normalized_score  # Already within [0, 1] by design
+    return normalized_score
