@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import numpy as np
 
 import torch
 from torch.optim import Adam
@@ -11,7 +12,7 @@ from models.Unrolled_ADMM import Unrolled_ADMM
 from models.unrolled_admm_gaussian import UnrolledADMMGaussian
 from utils.utils_data import get_dataloader
 from utils.utils_plot import plot_loss
-from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, MultiEllipseLoss
+from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, BestEllipseLoss
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -61,13 +62,13 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     elif loss == 'MultiScale':
         loss_fn = MultiScaleLoss()
     elif loss == 'MultiEllipse':
-        loss_fn = MultiEllipseLoss(
-            ellipse_levels=[0.3, 0.4, 0.5, 0.6, 0.7],
+        step = 0.025
+        pps = np.arange(start=0.3, stop=0.7+step, step=step)
+        loss_fn = BestEllipseLoss(
+            ellipse_levels=pps,
             center_weight=1.0,
             angle_weight=1.0,
             axis_weight=1.0,
-            ellipse_weights=None,
-            loss_aggregation='adaptive'
         )
     
     optimizer = Adam(params=model.parameters(), lr = lr)
