@@ -61,7 +61,7 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
         loss_fn = torch.nn.MSELoss()
     elif loss == 'MultiScale':
         loss_fn = MultiScaleLoss()
-    elif loss == 'MultiEllipse':
+    elif loss == 'BestEllipse':
         step = 0.025
         pps = np.arange(start=0.3, stop=0.7+step, step=step)
         loss_fn = BestEllipseLoss(
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     parser.add_argument('--filter', type=str, default='Laplacian', choices=['Identity', 'Laplacian'])
     parser.add_argument('--n_epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'MultiEllipse'])
+    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse'])
     parser.add_argument('--train_val_split', type=float, default=0.9)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
