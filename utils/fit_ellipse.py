@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -254,7 +253,7 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     """
     Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
     Higher values indicate better fit (more intensity inside ellipse, less outside).
-    Uses a parameterless, differentiable binary-like mask for the ellipse boundary.
+    Uses whole pixel counting and distance-weighted intensity for better center rewards.
     
     Parameters:
     -----------
@@ -263,7 +262,7 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     ellipse_params : torch.Tensor
         Tensor of ellipse parameters with shape (B, 5) containing:
         [center_y, center_x, theta, a, b] for each image in the batch
-    
+        
     Returns:
     --------
     torch.Tensor
@@ -276,17 +275,17 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
         image = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
     else:
         image = image_tensor
-    
+        
     B, H, W = image.shape
     device, dtype = image.device, image.dtype
-    
+        
     # Extract ellipse parameters with broadcasting shapes
     cy = ellipse_params[:, 0].view(B, 1, 1)
     cx = ellipse_params[:, 1].view(B, 1, 1)
     theta = ellipse_params[:, 2].view(B, 1, 1)
     a = ellipse_params[:, 3].view(B, 1, 1)
     b = ellipse_params[:, 4].view(B, 1, 1)
-    
+        
     # Create coordinate grids
     y_indices, x_indices = torch.meshgrid(
         torch.arange(H, device=device, dtype=dtype),
@@ -295,38 +294,49 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     )
     y_indices = y_indices.unsqueeze(0).expand(B, -1, -1)
     x_indices = x_indices.unsqueeze(0).expand(B, -1, -1)
-    
+        
     # Translate coordinates to ellipse center
     x_trans = x_indices - cx
     y_trans = y_indices - cy
-    
+        
     # Rotate coordinates
     cos_theta = torch.cos(theta)
     sin_theta = torch.sin(theta)
     x_rot = x_trans * cos_theta + y_trans * sin_theta
     y_rot = -x_trans * sin_theta + y_trans * cos_theta
-    
+        
     # Compute ellipse equation value for each pixel
     ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2
-    
-    # Create binary-like mask using torch.where (still differentiable)
-    inside_mask = torch.where(ellipse_eq <= 1.0, 1.0, 0.0)
+        
+    # Create binary mask for whole pixels (no partial pixels)
+    inside_mask = (ellipse_eq <= 1.0).float()
     outside_mask = 1.0 - inside_mask
     
-    # Calculate total intensity and area
-    inside_intensity = torch.sum(image * inside_mask, dim=(1, 2))
-    inside_area = torch.sum(inside_mask, dim=(1, 2))
+    # Calculate distance from center for weighting (normalized by ellipse size)
+    distance = torch.sqrt(((x_indices - cx) / a)**2 + ((y_indices - cy) / b)**2)
     
+    # Create distance weight (closer to center = higher weight)
+    # Using a simple linear weight: 1 at center, 0.5 at ellipse edge
+    distance_weight = torch.clamp(1.0 - distance * 0.5, min=0.5, max=1.0)
+    
+    # Apply distance weighting to inside pixels only
+    weighted_inside = image * inside_mask * distance_weight
+    weighted_inside_sum = torch.sum(weighted_inside, dim=(1, 2))
+    
+    # Count whole pixels
+    inside_count = torch.sum(inside_mask, dim=(1, 2))
+    outside_count = torch.sum(outside_mask, dim=(1, 2))
+    
+    # Calculate outside intensity (unweighted)
     outside_intensity = torch.sum(image * outside_mask, dim=(1, 2))
-    outside_area = torch.sum(outside_mask, dim=(1, 2))
     
     eps = 1e-8  # Avoid division by zero
-    
-    # Compute density ratio
-    inside_density = inside_intensity / (inside_area + eps)
-    outside_density = outside_intensity / (outside_area + eps)
+        
+    # Compute weighted density ratio
+    inside_density = weighted_inside_sum / (inside_count + eps)
+    outside_density = outside_intensity / (outside_count + eps)
     contrast_ratio = inside_density / (outside_density + eps)
-    
+        
     # Normalize to [0, 1]
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
