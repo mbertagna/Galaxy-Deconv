@@ -248,12 +248,13 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
     
     plt.tight_layout()
     return fig, axes
-
+    
 def ellipse_fit_metric(image_tensor, ellipse_params):
     """
     Computes a normalized metric (0 to 1) indicating how well an ellipse fits a galaxy.
     Higher values indicate better fit (more intensity inside ellipse, less outside).
     Uses whole pixel counting and distance-weighted intensity for better center rewards.
+    Only considers pixels within the image boundaries.
     
     Parameters:
     -----------
@@ -294,6 +295,10 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     )
     y_indices = y_indices.unsqueeze(0).expand(B, -1, -1)
     x_indices = x_indices.unsqueeze(0).expand(B, -1, -1)
+    
+    # Create valid image mask (all pixels within the image boundary)
+    # This is always True for all pixels, but we define it explicitly for clarity
+    valid_mask = torch.ones_like(y_indices, dtype=torch.bool)
         
     # Translate coordinates to ellipse center
     x_trans = x_indices - cx
@@ -309,8 +314,11 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2
         
     # Create binary mask for whole pixels (no partial pixels)
-    inside_mask = (ellipse_eq <= 1.0).float()
-    outside_mask = 1.0 - inside_mask
+    # Only count pixels that are within both the ellipse and the image boundary
+    inside_mask = (ellipse_eq <= 1.0).float() * valid_mask.float()
+    
+    # Outside mask is only valid pixels that are not inside the ellipse
+    outside_mask = valid_mask.float() - inside_mask
     
     # Calculate distance from center for weighting (normalized by ellipse size)
     distance = torch.sqrt(((x_indices - cx) / a)**2 + ((y_indices - cy) / b)**2)
@@ -323,7 +331,7 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     weighted_inside = image * inside_mask * distance_weight
     weighted_inside_sum = torch.sum(weighted_inside, dim=(1, 2))
     
-    # Count whole pixels
+    # Count whole pixels (only within valid image area)
     inside_count = torch.sum(inside_mask, dim=(1, 2))
     outside_count = torch.sum(outside_mask, dim=(1, 2))
     
@@ -331,12 +339,30 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     outside_intensity = torch.sum(image * outside_mask, dim=(1, 2))
     
     eps = 1e-8  # Avoid division by zero
-        
+    
+    # Handle cases where ellipse is completely outside the image
+    # or where there are no outside pixels
+    zero_inside = inside_count < eps
+    zero_outside = outside_count < eps
+    
     # Compute weighted density ratio
     inside_density = weighted_inside_sum / (inside_count + eps)
     outside_density = outside_intensity / (outside_count + eps)
-    contrast_ratio = inside_density / (outside_density + eps)
-        
+    
+    # If there are no outside pixels, set contrast_ratio to a high value
+    # If there are no inside pixels, set contrast_ratio to 0
+    contrast_ratio = torch.zeros_like(inside_density)
+    
+    # Normal case: both inside and outside pixels exist
+    normal_case = (~zero_inside & ~zero_outside)
+    contrast_ratio[normal_case] = inside_density[normal_case] / (outside_density[normal_case] + eps)
+    
+    # Edge case: no outside pixels (ellipse covers entire image)
+    contrast_ratio[~zero_inside & zero_outside] = 10.0  # arbitrary high value
+    
+    # Edge case: no inside pixels (ellipse completely outside image)
+    contrast_ratio[zero_inside] = 0.0
+    
     # Normalize to [0, 1]
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
