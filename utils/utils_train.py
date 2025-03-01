@@ -3,7 +3,7 @@ import torch
 import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched
+from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched, ellipse_fit_metric
 
 
 # import utils.cadmos_lib as cl
@@ -21,26 +21,20 @@ def get_model_name(method, loss, filter='Laplacian', n_iters=8, llh='Gaussian', 
     
     return model_name
 
-class MultiEllipseLoss(nn.Module):
-    def __init__(self, ellipse_levels=[0.3, 0.4, 0.5, 0.6, 0.7], center_weight=1.0, angle_weight=1.0, axis_weight=1.0, 
-                 ellipse_weights=None, loss_aggregation='weighted_sum'):
-        super(MultiEllipseLoss, self).__init__()
+class BestEllipseLoss(nn.Module):
+    def __init__(self, ellipse_levels=[0.3, 0.4, 0.5, 0.6, 0.7], 
+                 center_weight=1.0, angle_weight=1.0, axis_weight=1.0):
+        super(BestEllipseLoss, self).__init__()
         self.ellipse_levels = ellipse_levels
         self.num_ellipses = len(ellipse_levels)
         self.center_weight = center_weight
         self.angle_weight = angle_weight
         self.axis_weight = axis_weight
-        
-        # Default to equal weighting if not specified
-        if ellipse_weights is None:
-            self.ellipse_weights = torch.ones(self.num_ellipses) / self.num_ellipses
-        else:
-            self.ellipse_weights = torch.tensor(ellipse_weights)
-            self.ellipse_weights = self.ellipse_weights / self.ellipse_weights.sum()  # Normalize
-            
-        self.loss_aggregation = loss_aggregation
-            
+    
     def ellipse_loss_symmetric(self, output_params, target_params):
+        """
+        Compute symmetric loss between output and target ellipse parameters
+        """
         # Unpack parameters
         cx_out, cy_out, theta_out, a_out, b_out = output_params.unbind(-1)
         cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt = target_params.unbind(-1)
@@ -56,88 +50,83 @@ class MultiEllipseLoss(nn.Module):
         
         normalized_center_loss = F.mse_loss(
             center_coords_out / coord_scale.unsqueeze(-1),
-            center_coords_tgt / coord_scale.unsqueeze(-1)
-        )
+            center_coords_tgt / coord_scale.unsqueeze(-1),
+            reduction='none'
+        ).mean(dim=-1)  # Mean across coordinates but keep batch dimension
         
         # Angle loss using cosine similarity
         angle_vec_out = torch.stack([torch.cos(theta_out), torch.sin(theta_out)], dim=-1)
         angle_vec_tgt = torch.stack([torch.cos(theta_tgt), torch.sin(theta_tgt)], dim=-1)
         
         # Compute cosine similarity (dot product of normalized vectors)
-        # Since vectors are already normalized (cos² + sin² = 1), no need to normalize again
         cosine_sim = torch.sum(angle_vec_out * angle_vec_tgt, dim=-1)
         # Convert to loss (1 - cos_sim ranges from 0 to 2)
-        normalized_angle_loss = torch.mean(1 - cosine_sim)
+        normalized_angle_loss = 1 - cosine_sim
         
-        # Axis loss with symmetric normalization using MSE instead of L1
+        # Axis loss with symmetric normalization
         axis_scale = torch.maximum(out_max_axis, tgt_max_axis).unsqueeze(-1) + 1e-8
-        normalized_axis_loss = 0.5 * (
-            F.mse_loss(a_out / axis_scale, a_tgt / axis_scale) +
-            F.mse_loss(b_out / axis_scale, b_tgt / axis_scale)
-        )
+        normalized_a_loss = ((a_out / axis_scale) - (a_tgt / axis_scale))**2
+        normalized_b_loss = ((b_out / axis_scale) - (b_tgt / axis_scale))**2
+        normalized_axis_loss = 0.5 * (normalized_a_loss + normalized_b_loss)
         
-        # Combine losses
+        # Combine losses (keeping batch dimension)
         total_loss = (
             self.center_weight * normalized_center_loss +
             self.angle_weight * normalized_angle_loss +
             self.axis_weight * normalized_axis_loss
         )
         
-        return total_loss
+        return total_loss  # Shape: [batch_size]
     
     def forward(self, output, target):
-        # Extract ellipse parameters for each level for both output and target
-        output_params_list = []
-        target_params_list = []
+        batch_size = output.shape[0]
+        device = output.device
         
-        for pp in self.ellipse_levels:
-            # Extract ellipse parameters from output and target at current peak position level
-            output_params, _ = safe_ellipse_params_batched(transform_tensor_batched(output), peak_pos=pp)
-            target_params, _ = safe_ellipse_params_batched(transform_tensor_batched(target), peak_pos=pp)
-            
-            output_params_list.append(output_params)
-            target_params_list.append(target_params)
+        # Transform tensors
+        output_transformed = transform_tensor_batched(output)
+        target_transformed = transform_tensor_batched(target)
         
-        # Compute individual losses for each ellipse level
-        individual_losses = []
-        for i in range(self.num_ellipses):
-            loss_i = self.ellipse_loss_symmetric(output_params_list[i], target_params_list[i])
-            individual_losses.append(loss_i)
-            
-        # Convert to tensor
-        individual_losses = torch.stack(individual_losses)
+        # Arrays to store ellipse parameters and fit metrics for each level
+        gt_params_all_levels = []
+        gt_fit_metrics = torch.zeros((batch_size, self.num_ellipses), device=device)
         
-        # Aggregate losses based on selected method
-        if self.loss_aggregation == 'weighted_sum':
-            # Weighted sum of all ellipse losses
-            final_loss = torch.sum(individual_losses * self.ellipse_weights.to(individual_losses.device))
+        # Step 1: Compute ellipse parameters and fit metrics for each peak position on the ground truth
+        for i, pp in enumerate(self.ellipse_levels):
+            # Extract ground truth ellipse parameters at current peak position level
+            gt_params, _ = safe_ellipse_params_batched(target_transformed, peak_pos=pp)
+            gt_params_all_levels.append(gt_params)
             
-        elif self.loss_aggregation == 'min':
-            # Take the minimum loss (focus on best matching ellipse)
-            final_loss = torch.min(individual_losses)
-            
-        elif self.loss_aggregation == 'max':
-            # Take the maximum loss (focus on worst matching ellipse)
-            final_loss = torch.max(individual_losses)
-            
-        elif self.loss_aggregation == 'median':
-            # Take the median loss
-            final_loss = torch.median(individual_losses)
-            
-        elif self.loss_aggregation == 'mean':
-            # Simple average
-            final_loss = torch.mean(individual_losses)
-            
-        elif self.loss_aggregation == 'adaptive':
-            # Weight inversely proportional to loss value (focus more on well-matched ellipses)
-            weights = 1.0 / (individual_losses + 1e-8)
-            weights = weights / weights.sum()
-            final_loss = torch.sum(individual_losses * weights)
-            
-        else:
-            raise ValueError(f"Unsupported aggregation method: {self.loss_aggregation}")
-            
-        return final_loss
+            # Compute how well this ellipse fits the ground truth image
+            fit_metric = ellipse_fit_metric(target_transformed, gt_params)
+            gt_fit_metrics[:, i] = fit_metric
+        
+        # Step 2: Find the best ellipse for each image in the batch
+        best_ellipse_indices = torch.argmax(gt_fit_metrics, dim=1)  # Shape: [batch_size]
+        
+        # Step 3: Get the corresponding parameters for the best ellipses
+        best_gt_params = torch.zeros((batch_size, 5), device=device)
+        
+        for b in range(batch_size):
+            best_idx = best_ellipse_indices[b].item()
+            best_gt_params[b] = gt_params_all_levels[best_idx][b]
+        
+        # Step 4: Compute output ellipse parameters using the same peak positions as the best ground truth ellipses
+        output_params = torch.zeros((batch_size, 5), device=device)
+        
+        for b in range(batch_size):
+            best_idx = best_ellipse_indices[b].item()
+            pp = self.ellipse_levels[best_idx]
+            # Extract a single image from the batch
+            single_output = output_transformed[b:b+1]
+            # Compute ellipse params for this single image with the best peak position
+            params, _ = safe_ellipse_params_batched(single_output, peak_pos=pp)
+            output_params[b] = params[0]  # Extract from batch dimension
+        
+        # Step 5: Compute loss between output and ground truth using the best ellipse parameters
+        losses = self.ellipse_loss_symmetric(output_params, best_gt_params)
+        
+        # Return the mean loss across the batch
+        return losses.mean()
 
 class MultiScaleLoss(nn.Module):
     def __init__(self, scales=3, norm='L1', aux_loss_fn=None, aux_weight=0.1):
