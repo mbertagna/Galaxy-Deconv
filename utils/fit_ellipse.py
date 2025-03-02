@@ -367,19 +367,8 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
 
-def ellipse_params_from_moments(image_tensor, normalize=True):
-    """
-    Extract ellipse parameters directly from image moments.
-    
-    Args:
-        image_tensor: Batch of images with shape (B, H, W)
-        normalize: Whether to normalize the intensity before calculation
-        
-    Returns:
-        Tensor of shape (B, 5) with [cx, cy, theta, a, b] for each image
-    """
-
-    # Convert to grayscale if needed (B, H, W)
+def improved_ellipse_params_from_moments(image_tensor, normalize=True):
+    # Convert to grayscale if needed
     if image_tensor.dim() == 4:
         rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
         image_tensor = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
@@ -394,7 +383,7 @@ def ellipse_params_from_moments(image_tensor, normalize=True):
         indexing='ij'
     )
     
-    # Normalize image if needed
+    # Normalize image
     if normalize:
         images = transform_tensor_batched(image_tensor)
     else:
@@ -406,42 +395,89 @@ def ellipse_params_from_moments(image_tensor, normalize=True):
     for i in range(B):
         img = images[i]
         
+        # Apply threshold to focus on main object
+        max_val = torch.max(img)
+        if max_val < 1e-8:
+            continue
+            
+        # Threshold image to focus on significant intensities
+        threshold = 0.05 * max_val
+        mask = img > threshold
+        if torch.sum(mask) < 10:  # Need minimum number of pixels
+            mask = img > 0  # Fallback to all non-zero pixels
+        
+        masked_img = img * mask
+        
         # Zero-order moment (total intensity)
-        m00 = torch.sum(img)
-        if m00 < 1e-8:  # Check for empty image
+        m00 = torch.sum(masked_img)
+        if m00 < 1e-8:
             continue
             
         # First-order moments (for centroid)
-        m10 = torch.sum(img * x_coords)
-        m01 = torch.sum(img * y_coords)
+        m10 = torch.sum(masked_img * x_coords)
+        m01 = torch.sum(masked_img * y_coords)
         
         # Centroid
         cx = m10 / m00
         cy = m01 / m00
         
+        # Ensure centroid is inside image
+        cx = torch.clamp(cx, 0, W-1)
+        cy = torch.clamp(cy, 0, H-1)
+        
         # Central moments
-        mu20 = torch.sum(img * (x_coords - cx)**2)
-        mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy))
-        mu02 = torch.sum(img * (y_coords - cy)**2)
+        mu20 = torch.sum(masked_img * (x_coords - cx)**2)
+        mu11 = torch.sum(masked_img * (x_coords - cx) * (y_coords - cy))
+        mu02 = torch.sum(masked_img * (y_coords - cy)**2)
         
         # Normalize central moments
-        if m00 > 1e-8:
-            mu20 /= m00
-            mu11 /= m00
-            mu02 /= m00
+        mu20 /= m00
+        mu11 /= m00
+        mu02 /= m00
         
         # Calculate orientation angle
-        theta = 0.5 * torch.atan2(2 * mu11, mu20 - mu02)
+        delta = mu20 - mu02
+        if abs(delta) < 1e-8 and abs(mu11) < 1e-8:
+            # Circle case or numerical instability
+            theta = 0.0
+        else:
+            theta = 0.5 * torch.atan2(2 * mu11, delta)
         
         # Calculate eigenvalues of the covariance matrix
         cov_mat = torch.tensor([[mu20, mu11], [mu11, mu02]], device=device)
-        eigenvalues, _ = torch.linalg.eigh(cov_mat)
+        try:
+            eigenvalues, _ = torch.linalg.eigh(cov_mat)
+            eigenvalues = torch.clamp(eigenvalues, min=1e-6)
+        except:
+            # Fallback for numerical issues
+            eigenvalues = torch.tensor([mu02, mu20], device=device)
         
-        # Semi-axes lengths (scaled by a factor to match the object)
-        # The scaling factor (4) is empirical and may need adjustment
-        scale = 4.0
-        a = scale * torch.sqrt(eigenvalues[1])
-        b = scale * torch.sqrt(eigenvalues[0])
+        # Count significant pixels for area-based scaling
+        significant_pixels = torch.sum(mask).float()
+        
+        # Calculate base semi-axes (from standard deviations)
+        base_a = torch.sqrt(eigenvalues[1])
+        base_b = torch.sqrt(eigenvalues[0])
+        
+        # Theoretical ellipse area based on standard deviations
+        theoretical_area = np.pi * base_a * base_b
+        
+        # Calculate scaling factor based on area
+        area_ratio = significant_pixels / (theoretical_area + 1e-8)
+        
+        # Apply adaptive scaling with constraints
+        min_scale = 2.0
+        max_scale = 6.0
+        adaptive_scale = torch.clamp(torch.sqrt(area_ratio), min=min_scale, max=max_scale)
+        
+        # Apply scale to semi-axes
+        a = adaptive_scale * base_a
+        b = adaptive_scale * base_b
+        
+        # Ensure minimum size
+        min_axis = 2.0
+        a = torch.max(a, torch.tensor(min_axis, device=device))
+        b = torch.max(b, torch.tensor(min_axis, device=device))
         
         # Store parameters
         ellipse_params[i] = torch.tensor([cy, cx, theta, a, b], device=device)
