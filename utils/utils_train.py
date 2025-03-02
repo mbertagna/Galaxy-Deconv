@@ -146,11 +146,13 @@ class MomentBasedLoss(nn.Module):
         B, H, W = image_tensor.shape
         device = image_tensor.device
         
-        # Normalize image if requested
+        # Normalize image if requested - make sure this creates a new tensor
         if self.normalize:
+            # Assuming transform_tensor_batched returns a new tensor and doesn't modify in-place
             images = transform_tensor_batched(image_tensor)
         else:
-            images = image_tensor
+            # Create a new tensor to avoid modifying the original
+            images = image_tensor.clone()
         
         # Prepare coordinate grids
         y_coords, x_coords = torch.meshgrid(
@@ -180,10 +182,12 @@ class MomentBasedLoss(nn.Module):
             centroids[i, 0] = cy  # Store y-coordinate first to match ellipse params
             centroids[i, 1] = cx
             
-            # Central moments
-            mu20 = torch.sum(img * (x_coords - cx)**2) / m00[i]
-            mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy)) / m00[i]
-            mu02 = torch.sum(img * (y_coords - cy)**2) / m00[i]
+            # Central moments - avoid in-place operations
+            x_diff = x_coords - cx
+            y_diff = y_coords - cy
+            mu20 = torch.sum(img * x_diff.pow(2)) / m00[i]
+            mu11 = torch.sum(img * x_diff * y_diff) / m00[i]
+            mu02 = torch.sum(img * y_diff.pow(2)) / m00[i]
             
             central_moments[i, 0] = mu20
             central_moments[i, 1] = mu11
