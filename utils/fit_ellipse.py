@@ -366,3 +366,78 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     # Normalize to [0, 1]
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
+
+def ellipse_params_from_moments(image_tensor, normalize=True):
+    """
+    Extract ellipse parameters directly from image moments.
+    
+    Args:
+        image_tensor: Batch of images with shape (B, H, W)
+        normalize: Whether to normalize the intensity before calculation
+        
+    Returns:
+        Tensor of shape (B, 5) with [cx, cy, theta, a, b] for each image
+    """
+    B, H, W = image_tensor.shape
+    device = image_tensor.device
+    
+    # Prepare coordinate grids
+    y_coords, x_coords = torch.meshgrid(
+        torch.arange(H, device=device, dtype=torch.float32),
+        torch.arange(W, device=device, dtype=torch.float32),
+        indexing='ij'
+    )
+    
+    # Normalize image if needed
+    if normalize:
+        images = transform_tensor_batched(image_tensor)
+    else:
+        images = image_tensor
+    
+    # Preallocate output tensors
+    ellipse_params = torch.zeros((B, 5), device=device)
+    
+    for b in range(B):
+        img = images[b]
+        
+        # Zero-order moment (total intensity)
+        m00 = torch.sum(img)
+        if m00 < 1e-8:  # Check for empty image
+            continue
+            
+        # First-order moments (for centroid)
+        m10 = torch.sum(img * x_coords)
+        m01 = torch.sum(img * y_coords)
+        
+        # Centroid
+        cx = m10 / m00
+        cy = m01 / m00
+        
+        # Central moments
+        mu20 = torch.sum(img * (x_coords - cx)**2)
+        mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy))
+        mu02 = torch.sum(img * (y_coords - cy)**2)
+        
+        # Normalize central moments
+        if m00 > 1e-8:
+            mu20 /= m00
+            mu11 /= m00
+            mu02 /= m00
+        
+        # Calculate orientation angle
+        theta = 0.5 * torch.atan2(2 * mu11, mu20 - mu02)
+        
+        # Calculate eigenvalues of the covariance matrix
+        cov_mat = torch.tensor([[mu20, mu11], [mu11, mu02]], device=device)
+        eigenvalues, _ = torch.linalg.eigh(cov_mat)
+        
+        # Semi-axes lengths (scaled by a factor to match the object)
+        # The scaling factor (4) is empirical and may need adjustment
+        scale = 4.0
+        a = scale * torch.sqrt(eigenvalues[1])
+        b = scale * torch.sqrt(eigenvalues[0])
+        
+        # Store parameters
+        ellipse_params[b] = torch.tensor([cy, cx, theta, a, b], device=device)
+    
+    return ellipse_params
