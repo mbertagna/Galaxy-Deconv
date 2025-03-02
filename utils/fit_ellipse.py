@@ -367,7 +367,7 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
 
-def improved_ellipse_params_from_moments(image_tensor, normalize=True):
+def ellipse_params_from_moments(image_tensor, normalize=True):
     # Convert to grayscale if needed
     if image_tensor.dim() == 4:
         rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
