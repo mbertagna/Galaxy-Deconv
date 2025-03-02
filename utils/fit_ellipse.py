@@ -378,6 +378,12 @@ def ellipse_params_from_moments(image_tensor, normalize=True):
     Returns:
         Tensor of shape (B, 5) with [cx, cy, theta, a, b] for each image
     """
+
+    # Convert to grayscale if needed (B, H, W)
+    if image_tensor.dim() == 4:
+        rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
+        image_tensor = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
+    
     B, H, W = image_tensor.shape
     device = image_tensor.device
     
