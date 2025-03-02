@@ -127,6 +127,98 @@ class BestEllipseLoss(nn.Module):
         
         # Return the mean loss across the batch
         return losses.mean()
+    
+class MomentBasedLoss(nn.Module):
+    def __init__(self, normalize=True, central_moments_weight=1.0, centroid_weight=1.0):
+        super(MomentBasedLoss, self).__init__()
+        self.normalize = normalize
+        self.central_moments_weight = central_moments_weight
+        self.centroid_weight = centroid_weight
+    
+    def compute_moments(self, image_tensor):
+        # Convert to grayscale if needed
+        if image_tensor.dim() == 4 and image_tensor.shape[1] > 1:
+            rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
+            image_tensor = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
+        elif image_tensor.dim() == 4 and image_tensor.shape[1] == 1:
+            image_tensor = image_tensor.squeeze(1)
+        
+        B, H, W = image_tensor.shape
+        device = image_tensor.device
+        
+        # Normalize image if requested
+        if self.normalize:
+            images = transform_tensor_batched(image_tensor)
+        else:
+            images = image_tensor
+        
+        # Prepare coordinate grids
+        y_coords, x_coords = torch.meshgrid(
+            torch.arange(H, device=device, dtype=torch.float32),
+            torch.arange(W, device=device, dtype=torch.float32),
+            indexing='ij'
+        )
+        
+        # Preallocate tensors for moments
+        m00 = torch.zeros(B, device=device)
+        centroids = torch.zeros((B, 2), device=device)  # [cy, cx]
+        central_moments = torch.zeros((B, 3), device=device)  # [mu20, mu11, mu02]
+        
+        for i in range(B):
+            img = images[i]
+            
+            # Zero-order moment (total intensity)
+            m00[i] = torch.sum(img) + 1e-8
+                
+            # First-order moments (for centroid)
+            m10 = torch.sum(img * x_coords)
+            m01 = torch.sum(img * y_coords)
+            
+            # Centroid
+            cx = m10 / m00[i]
+            cy = m01 / m00[i]
+            centroids[i, 0] = cy  # Store y-coordinate first to match ellipse params
+            centroids[i, 1] = cx
+            
+            # Central moments
+            mu20 = torch.sum(img * (x_coords - cx)**2) / m00[i]
+            mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy)) / m00[i]
+            mu02 = torch.sum(img * (y_coords - cy)**2) / m00[i]
+            
+            central_moments[i, 0] = mu20
+            central_moments[i, 1] = mu11
+            central_moments[i, 2] = mu02
+        
+        return {
+            'mass': m00,
+            'centroids': centroids,
+            'central_moments': central_moments
+        }
+    
+    def forward(self, output, target):
+        # Compute moments for both output and target
+        output_moments = self.compute_moments(output)
+        target_moments = self.compute_moments(target)
+        
+        # Centroid loss (direct comparison)
+        centroid_loss = F.mse_loss(
+            output_moments['centroids'],
+            target_moments['centroids']
+        )
+        
+        # Central moments loss
+        central_moments_loss = F.mse_loss(
+            output_moments['central_moments'],
+            target_moments['central_moments']
+        )
+        
+        # Total loss
+        total_loss = (
+            self.centroid_weight * centroid_loss + 
+            self.central_moments_weight * central_moments_loss
+        )
+        
+        return total_loss
 
 class MultiScaleLoss(nn.Module):
     def __init__(self, scales=3, norm='L1', aux_loss_fn=None, aux_weight=0.1):
