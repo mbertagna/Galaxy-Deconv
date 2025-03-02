@@ -403,8 +403,8 @@ def ellipse_params_from_moments(image_tensor, normalize=True):
     # Preallocate output tensors
     ellipse_params = torch.zeros((B, 5), device=device)
     
-    for b in range(B):
-        img = images[b]
+    for i in range(B):
+        img = images[i]
         
         # Zero-order moment (total intensity)
         m00 = torch.sum(img)
@@ -444,6 +444,6 @@ def ellipse_params_from_moments(image_tensor, normalize=True):
         b = scale * torch.sqrt(eigenvalues[0])
         
         # Store parameters
-        ellipse_params[b] = torch.tensor([cy, cx, theta, a, b], device=device)
+        ellipse_params[i] = torch.tensor([cy, cx, theta, a, b], device=device)
     
     return ellipse_params
