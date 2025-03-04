@@ -398,7 +398,16 @@ def normalize_images(batch):
     
     return normalized
 
-def ellipse_params_from_moments(image_tensor):
+def compute_moments(image_tensor):
+    """
+    Compute image moments for a batch of images.
+    
+    Args:
+        image_tensor: Tensor of shape [B, C, H, W]
+        
+    Returns:
+        moments_dict: Dictionary containing moment values for each image in the batch
+    """
     image_tensor = normalize_images(image_tensor)
     
     # Handle the channel dimension
@@ -419,8 +428,8 @@ def ellipse_params_from_moments(image_tensor):
         indexing='ij'
     )
     
-    # Preallocate output tensors
-    ellipse_params = torch.zeros((B, 5), device=device)
+    # List to store moments for each image
+    batch_moments = []
     
     for i in range(B):
         img = image_tensor[i]
@@ -440,6 +449,49 @@ def ellipse_params_from_moments(image_tensor):
         mu20 = torch.sum(img * (x_coords - cx)**2) / m00
         mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy)) / m00
         mu02 = torch.sum(img * (y_coords - cy)**2) / m00
+        
+        # Store moments in a dictionary
+        moments = {
+            'm00': m00,
+            'cx': cx,
+            'cy': cy,
+            'mu20': mu20,
+            'mu11': mu11,
+            'mu02': mu02
+        }
+        
+        batch_moments.append(moments)
+    
+    return batch_moments
+
+def ellipse_params_from_moments(image_tensor):
+    """
+    Calculate ellipse parameters from image moments for a batch of images.
+    
+    Args:
+        image_tensor: Tensor of shape [B, C, H, W]
+        
+    Returns:
+        ellipse_params: Tensor of shape [B, 5] containing [cy, cx, theta, a, b] for each image
+    """
+    # Get the moments for each image in the batch
+    batch_moments = compute_moments(image_tensor)
+    
+    B = len(batch_moments)
+    device = image_tensor.device
+    
+    # Preallocate output tensor
+    ellipse_params = torch.zeros((B, 5), device=device)
+    
+    for i in range(B):
+        moments = batch_moments[i]
+        
+        # Extract moments
+        cy = moments['cy']
+        cx = moments['cx']
+        mu20 = moments['mu20']
+        mu11 = moments['mu11']
+        mu02 = moments['mu02']
         
         # Calculate orientation angle
         delta = mu20 - mu02
