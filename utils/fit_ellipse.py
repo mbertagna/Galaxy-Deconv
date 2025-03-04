@@ -378,7 +378,6 @@ def normalize_images(batch):
         Normalized tensor with same shape but values scaled to [0, 1]
     """
     # Get min and max per image (keeping batch and channel dimensions)
-    # Reshape to view each image as a flattened array for min/max computation
     batch_size, channels, height, width = batch.shape
     reshaped = batch.view(batch_size, channels, -1)
     
@@ -391,9 +390,8 @@ def normalize_images(batch):
     max_vals = max_vals.unsqueeze(-1)  # Add width dimension
     
     # Handle case where min == max (constant image)
-    # Avoid division by zero
-    divisor = max_vals - min_vals
-    divisor[divisor == 0] = 1.0
+    # Avoid division by zero by creating a new tensor instead of modifying in place
+    divisor = torch.maximum(max_vals - min_vals, torch.ones_like(max_vals) * 1e-8)
     
     # Scale to [0, 1]
     normalized = (batch - min_vals) / divisor
@@ -403,8 +401,16 @@ def normalize_images(batch):
 def ellipse_params_from_moments(image_tensor):
     image_tensor = normalize_images(image_tensor)
     
-    B, H, W = image_tensor.shape
+    # Handle the channel dimension
+    B, C, H, W = image_tensor.shape
     device = image_tensor.device
+    
+    # If single-channel, squeeze the channel dimension for the calculations
+    if C == 1:
+        image_tensor = image_tensor.squeeze(1)
+    else:
+        # If multi-channel, convert to grayscale by averaging channels
+        image_tensor = image_tensor.mean(dim=1)
     
     # Prepare coordinate grids
     y_coords, x_coords = torch.meshgrid(
@@ -447,9 +453,9 @@ def ellipse_params_from_moments(image_tensor):
         lambda1 = 0.5 * (trace + disc)
         lambda2 = 0.5 * (trace - disc)
         
-        # Ensure eigenvalues are positive
-        lambda1 = torch.relu(lambda1) + 1e-6
-        lambda2 = torch.relu(lambda2) + 1e-6
+        # Ensure eigenvalues are positive without in-place operations
+        lambda1 = torch.maximum(lambda1, torch.tensor(1e-6, device=device))
+        lambda2 = torch.maximum(lambda2, torch.tensor(1e-6, device=device))
         
         # Calculate semi-axes
         a = torch.sqrt(lambda1)
