@@ -367,11 +367,41 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
 
-def ellipse_params_from_moments(image_tensor, normalize=True):
-    # Convert to grayscale if needed
-    if image_tensor.dim() == 4:
-        rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
-        image_tensor = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
+def normalize_images(batch):
+    """
+    Scale pixel values in each image of the batch to range [0, 1].
+    
+    Args:
+        batch: Tensor of shape [batch_size, channels, height, width]
+        
+    Returns:
+        Normalized tensor with same shape but values scaled to [0, 1]
+    """
+    # Get min and max per image (keeping batch and channel dimensions)
+    # Reshape to view each image as a flattened array for min/max computation
+    batch_size, channels, height, width = batch.shape
+    reshaped = batch.view(batch_size, channels, -1)
+    
+    # Find min and max for each image
+    min_vals = reshaped.min(dim=2, keepdim=True)[0]
+    max_vals = reshaped.max(dim=2, keepdim=True)[0]
+    
+    # Reshape min and max back to original dimensions for broadcasting
+    min_vals = min_vals.unsqueeze(-1)  # Add width dimension
+    max_vals = max_vals.unsqueeze(-1)  # Add width dimension
+    
+    # Handle case where min == max (constant image)
+    # Avoid division by zero
+    divisor = max_vals - min_vals
+    divisor[divisor == 0] = 1.0
+    
+    # Scale to [0, 1]
+    normalized = (batch - min_vals) / divisor
+    
+    return normalized
+
+def ellipse_params_from_moments(image_tensor):
+    image_tensor = normalize_images(image_tensor)
     
     B, H, W = image_tensor.shape
     device = image_tensor.device
@@ -383,17 +413,11 @@ def ellipse_params_from_moments(image_tensor, normalize=True):
         indexing='ij'
     )
     
-    # Normalize image if requested
-    if normalize:
-        images = transform_tensor_batched(image_tensor)
-    else:
-        images = image_tensor
-    
     # Preallocate output tensors
     ellipse_params = torch.zeros((B, 5), device=device)
     
     for i in range(B):
-        img = images[i]
+        img = image_tensor[i]
         
         # Zero-order moment (total intensity)
         m00 = torch.sum(img) + 1e-8
