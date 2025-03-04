@@ -3,7 +3,7 @@ import torch
 import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched, ellipse_fit_metric
+from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched, ellipse_fit_metric, compute_moments
 
 
 # import utils.cadmos_lib as cl
@@ -129,92 +129,50 @@ class BestEllipseLoss(nn.Module):
         return losses.mean()
     
 class MomentBasedLoss(nn.Module):
-    def __init__(self, normalize=True, central_moments_weight=1.0, centroid_weight=1.0):
+    def __init__(self, central_moments_weight=1.0, centroid_weight=1.0):
         super(MomentBasedLoss, self).__init__()
-        self.normalize = normalize
         self.central_moments_weight = central_moments_weight
         self.centroid_weight = centroid_weight
     
-    def compute_moments(self, image_tensor):
-        # Convert to grayscale if needed
-        if image_tensor.dim() == 4 and image_tensor.shape[1] > 1:
-            rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
-            image_tensor = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
-        elif image_tensor.dim() == 4 and image_tensor.shape[1] == 1:
-            image_tensor = image_tensor.squeeze(1)
-        
-        B, H, W = image_tensor.shape
-        device = image_tensor.device
-        
-        # Normalize image if requested - make sure this creates a new tensor
-        if self.normalize:
-            # Assuming transform_tensor_batched returns a new tensor and doesn't modify in-place
-            images = transform_tensor_batched(image_tensor)
-        else:
-            # Create a new tensor to avoid modifying the original
-            images = image_tensor.clone()
-        
-        # Prepare coordinate grids
-        y_coords, x_coords = torch.meshgrid(
-            torch.arange(H, device=device, dtype=torch.float32),
-            torch.arange(W, device=device, dtype=torch.float32),
-            indexing='ij'
-        )
-        
-        # Preallocate tensors for moments
-        m00 = torch.zeros(B, device=device)
-        centroids = torch.zeros((B, 2), device=device)  # [cy, cx]
-        central_moments = torch.zeros((B, 3), device=device)  # [mu20, mu11, mu02]
-        
-        for i in range(B):
-            img = images[i]
-            
-            # Zero-order moment (total intensity)
-            m00[i] = torch.sum(img) + 1e-8
-                
-            # First-order moments (for centroid)
-            m10 = torch.sum(img * x_coords)
-            m01 = torch.sum(img * y_coords)
-            
-            # Centroid
-            cx = m10 / m00[i]
-            cy = m01 / m00[i]
-            centroids[i, 0] = cy  # Store y-coordinate first to match ellipse params
-            centroids[i, 1] = cx
-            
-            # Central moments - avoid in-place operations
-            x_diff = x_coords - cx
-            y_diff = y_coords - cy
-            mu20 = torch.sum(img * x_diff.pow(2)) / m00[i]
-            mu11 = torch.sum(img * x_diff * y_diff) / m00[i]
-            mu02 = torch.sum(img * y_diff.pow(2)) / m00[i]
-            
-            central_moments[i, 0] = mu20
-            central_moments[i, 1] = mu11
-            central_moments[i, 2] = mu02
-        
-        return {
-            'mass': m00,
-            'centroids': centroids,
-            'central_moments': central_moments
-        }
-    
     def forward(self, output, target):
-        # Compute moments for both output and target
-        output_moments = self.compute_moments(output)
-        target_moments = self.compute_moments(target)
+        # Use the external compute_moments function to get moments
+        output_batch_moments = compute_moments(output)
+        target_batch_moments = compute_moments(target)
+        
+        # Extract device for tensor creation
+        device = output.device
+        B = len(output_batch_moments)
+        
+        # Prepare tensors for comparison
+        output_centroids = torch.zeros((B, 2), device=device)
+        target_centroids = torch.zeros((B, 2), device=device)
+        output_central_moments = torch.zeros((B, 3), device=device)
+        target_central_moments = torch.zeros((B, 3), device=device)
+        
+        # Convert moment dictionaries to tensors
+        for i in range(B):
+            output_moments = output_batch_moments[i]
+            target_moments = target_batch_moments[i]
+            
+            # Store centroids [cy, cx]
+            output_centroids[i, 0] = output_moments['cy']
+            output_centroids[i, 1] = output_moments['cx']
+            target_centroids[i, 0] = target_moments['cy']
+            target_centroids[i, 1] = target_moments['cx']
+            
+            # Store central moments [mu20, mu11, mu02]
+            output_central_moments[i, 0] = output_moments['mu20']
+            output_central_moments[i, 1] = output_moments['mu11']
+            output_central_moments[i, 2] = output_moments['mu02']
+            target_central_moments[i, 0] = target_moments['mu20']
+            target_central_moments[i, 1] = target_moments['mu11']
+            target_central_moments[i, 2] = target_moments['mu02']
         
         # Centroid loss (direct comparison)
-        centroid_loss = F.mse_loss(
-            output_moments['centroids'],
-            target_moments['centroids']
-        )
+        centroid_loss = F.mse_loss(output_centroids, target_centroids)
         
         # Central moments loss
-        central_moments_loss = F.mse_loss(
-            output_moments['central_moments'],
-            target_moments['central_moments']
-        )
+        central_moments_loss = F.mse_loss(output_central_moments, target_central_moments)
         
         # Total loss
         total_loss = (
