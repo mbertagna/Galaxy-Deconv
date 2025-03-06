@@ -128,11 +128,66 @@ class BestEllipseLoss(nn.Module):
         # Return the mean loss across the batch
         return losses.mean()
     
+# class MomentBasedLoss(nn.Module):
+#     def __init__(self, central_moments_weight=1.0, centroid_weight=1.0):
+#         super(MomentBasedLoss, self).__init__()
+#         self.central_moments_weight = central_moments_weight
+#         self.centroid_weight = centroid_weight
+    
+#     def forward(self, output, target):
+#         # Use the external compute_moments function to get moments
+#         output_batch_moments = compute_moments(output)
+#         target_batch_moments = compute_moments(target)
+        
+#         # Extract device for tensor creation
+#         device = output.device
+#         B = len(output_batch_moments)
+        
+#         # Prepare tensors for comparison
+#         output_centroids = torch.zeros((B, 2), device=device)
+#         target_centroids = torch.zeros((B, 2), device=device)
+#         output_central_moments = torch.zeros((B, 3), device=device)
+#         target_central_moments = torch.zeros((B, 3), device=device)
+        
+#         # Convert moment dictionaries to tensors
+#         for i in range(B):
+#             output_moments = output_batch_moments[i]
+#             target_moments = target_batch_moments[i]
+            
+#             # Store centroids [cy, cx]
+#             output_centroids[i, 0] = output_moments['cy']
+#             output_centroids[i, 1] = output_moments['cx']
+#             target_centroids[i, 0] = target_moments['cy']
+#             target_centroids[i, 1] = target_moments['cx']
+            
+#             # Store central moments [mu20, mu11, mu02]
+#             output_central_moments[i, 0] = output_moments['mu20']
+#             output_central_moments[i, 1] = output_moments['mu11']
+#             output_central_moments[i, 2] = output_moments['mu02']
+#             target_central_moments[i, 0] = target_moments['mu20']
+#             target_central_moments[i, 1] = target_moments['mu11']
+#             target_central_moments[i, 2] = target_moments['mu02']
+        
+#         # Centroid loss (direct comparison)
+#         centroid_loss = F.mse_loss(output_centroids, target_centroids)
+        
+#         # Central moments loss
+#         central_moments_loss = F.mse_loss(output_central_moments, target_central_moments)
+        
+#         # Total loss
+#         total_loss = (
+#             self.centroid_weight * centroid_loss + 
+#             self.central_moments_weight * central_moments_loss
+#         )
+        
+#         return total_loss
+
 class MomentBasedLoss(nn.Module):
-    def __init__(self, central_moments_weight=1.0, centroid_weight=1.0):
+    def __init__(self, central_moments_weight=1.0, centroid_weight=1.0, third_order_weight=1.0):
         super(MomentBasedLoss, self).__init__()
         self.central_moments_weight = central_moments_weight
         self.centroid_weight = centroid_weight
+        self.third_order_weight = third_order_weight
     
     def forward(self, output, target):
         # Use the external compute_moments function to get moments
@@ -148,6 +203,8 @@ class MomentBasedLoss(nn.Module):
         target_centroids = torch.zeros((B, 2), device=device)
         output_central_moments = torch.zeros((B, 3), device=device)
         target_central_moments = torch.zeros((B, 3), device=device)
+        output_third_order = torch.zeros((B, 4), device=device)
+        target_third_order = torch.zeros((B, 4), device=device)
         
         # Convert moment dictionaries to tensors
         for i in range(B):
@@ -160,24 +217,38 @@ class MomentBasedLoss(nn.Module):
             target_centroids[i, 0] = target_moments['cy']
             target_centroids[i, 1] = target_moments['cx']
             
-            # Store central moments [mu20, mu11, mu02]
+            # Store second-order central moments [mu20, mu11, mu02]
             output_central_moments[i, 0] = output_moments['mu20']
             output_central_moments[i, 1] = output_moments['mu11']
             output_central_moments[i, 2] = output_moments['mu02']
             target_central_moments[i, 0] = target_moments['mu20']
             target_central_moments[i, 1] = target_moments['mu11']
             target_central_moments[i, 2] = target_moments['mu02']
+            
+            # Store third-order central moments [mu30, mu21, mu12, mu03]
+            output_third_order[i, 0] = output_moments['mu30']
+            output_third_order[i, 1] = output_moments['mu21']
+            output_third_order[i, 2] = output_moments['mu12']
+            output_third_order[i, 3] = output_moments['mu03']
+            target_third_order[i, 0] = target_moments['mu30']
+            target_third_order[i, 1] = target_moments['mu21']
+            target_third_order[i, 2] = target_moments['mu12']
+            target_third_order[i, 3] = target_moments['mu03']
         
         # Centroid loss (direct comparison)
         centroid_loss = F.mse_loss(output_centroids, target_centroids)
         
-        # Central moments loss
+        # Second-order central moments loss
         central_moments_loss = F.mse_loss(output_central_moments, target_central_moments)
+        
+        # Third-order central moments loss
+        third_order_loss = F.mse_loss(output_third_order, target_third_order)
         
         # Total loss
         total_loss = (
             self.centroid_weight * centroid_loss + 
-            self.central_moments_weight * central_moments_loss
+            self.central_moments_weight * central_moments_loss +
+            self.third_order_weight * third_order_loss
         )
         
         return total_loss

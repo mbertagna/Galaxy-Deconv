@@ -398,9 +398,75 @@ def normalize_images(batch):
     
     return normalized
 
+# def compute_moments(image_tensor):
+#     """
+#     Compute image moments for a batch of images.
+    
+#     Args:
+#         image_tensor: Tensor of shape [B, C, H, W]
+        
+#     Returns:
+#         moments_dict: Dictionary containing moment values for each image in the batch
+#     """
+#     image_tensor = normalize_images(image_tensor)
+    
+#     # Handle the channel dimension
+#     B, C, H, W = image_tensor.shape
+#     device = image_tensor.device
+    
+#     # If single-channel, squeeze the channel dimension for the calculations
+#     if C == 1:
+#         image_tensor = image_tensor.squeeze(1)
+#     else:
+#         # If multi-channel, convert to grayscale by averaging channels
+#         image_tensor = image_tensor.mean(dim=1)
+    
+#     # Prepare coordinate grids
+#     y_coords, x_coords = torch.meshgrid(
+#         torch.arange(H, device=device, dtype=torch.float32),
+#         torch.arange(W, device=device, dtype=torch.float32),
+#         indexing='ij'
+#     )
+    
+#     # List to store moments for each image
+#     batch_moments = []
+    
+#     for i in range(B):
+#         img = image_tensor[i]
+        
+#         # Zero-order moment (total intensity)
+#         m00 = torch.sum(img) + 1e-8
+            
+#         # First-order moments (for centroid)
+#         m10 = torch.sum(img * x_coords)
+#         m01 = torch.sum(img * y_coords)
+        
+#         # Centroid
+#         cx = m10 / m00
+#         cy = m01 / m00
+        
+#         # Central moments
+#         mu20 = torch.sum(img * (x_coords - cx)**2) / m00
+#         mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy)) / m00
+#         mu02 = torch.sum(img * (y_coords - cy)**2) / m00
+        
+#         # Store moments in a dictionary
+#         moments = {
+#             'm00': m00,
+#             'cx': cx,
+#             'cy': cy,
+#             'mu20': mu20,
+#             'mu11': mu11,
+#             'mu02': mu02
+#         }
+        
+#         batch_moments.append(moments)
+    
+#     return batch_moments
+
 def compute_moments(image_tensor):
     """
-    Compute image moments for a batch of images.
+    Compute image moments up to order 3 for a batch of images.
     
     Args:
         image_tensor: Tensor of shape [B, C, H, W]
@@ -445,19 +511,36 @@ def compute_moments(image_tensor):
         cx = m10 / m00
         cy = m01 / m00
         
-        # Central moments
+        # Central moments up to order 2
         mu20 = torch.sum(img * (x_coords - cx)**2) / m00
         mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy)) / m00
         mu02 = torch.sum(img * (y_coords - cy)**2) / m00
         
+        # Central moments of order 3
+        mu30 = torch.sum(img * (x_coords - cx)**3) / m00
+        mu21 = torch.sum(img * (x_coords - cx)**2 * (y_coords - cy)) / m00
+        mu12 = torch.sum(img * (x_coords - cx) * (y_coords - cy)**2) / m00
+        mu03 = torch.sum(img * (y_coords - cy)**3) / m00
+        
         # Store moments in a dictionary
         moments = {
+            # Zero-order moment
             'm00': m00,
+            
+            # Centroid
             'cx': cx,
             'cy': cy,
+            
+            # Second-order central moments
             'mu20': mu20,
             'mu11': mu11,
-            'mu02': mu02
+            'mu02': mu02,
+            
+            # Third-order central moments
+            'mu30': mu30,
+            'mu21': mu21,
+            'mu12': mu12,
+            'mu03': mu03
         }
         
         batch_moments.append(moments)
