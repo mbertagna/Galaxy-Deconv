@@ -78,9 +78,9 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     train_loss_list, val_loss_list = [], []
     val_loss_min, epoch_min = 1.e9, 0
     for epoch in range(n_epochs):
-        model.train()
         train_loss = 0.0
         for idx, ((obs, psf, alpha), gt) in enumerate(train_loader):
+            model.train()
             optimizer.zero_grad()
             obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
             rec = model(obs, psf, alpha)
@@ -92,15 +92,26 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
             train_loss = loss.item()
             
             # Evaluate on valid dataset.
+            # if (idx+1) % 25 == 0:
+            #     val_loss = 0.0
+            #     model.eval()
+            #     with torch.no_grad():
+            #         for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+            #             obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+            #             rec = model(obs, psf, alpha)
+            #             loss = loss_fn(gt, rec)
+            #             val_loss += loss.item()
+
             if (idx+1) % 25 == 0:
                 val_loss = 0.0
                 model.eval()
-                with torch.no_grad():
-                    for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
-                        obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
-                        rec = model(obs, psf, alpha)
-                        loss = loss_fn(gt, rec)
-                        val_loss += loss.item()
+                for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+                    obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+                    # Allow gradients for loss calculation but detach inputs
+                    obs_d, psf_d, alpha_d = obs.detach(), psf.detach(), alpha.detach()
+                    rec = model(obs_d, psf_d, alpha_d)
+                    loss = loss_fn(rec, gt)
+                    val_loss += loss.item()
 
                 logger.info(" [{}: {}/{}]  train_loss={:.4g}  val_loss={:.4g}".format(
                                 epoch+1, idx+1, len(train_loader),
@@ -108,25 +119,45 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
                                 val_loss/len(val_loader)))
     
         # Evaluate on train & valid dataset after every epoch.
+        # train_loss = 0.0
+        # model.eval()
+        # with torch.no_grad():
+        #     for _, ((obs, psf, alpha), gt) in enumerate(train_loader):
+        #         obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+        #         rec = model(obs, psf, alpha)
+        #         loss = loss_fn(gt, rec)
+        #         train_loss += loss.item()
+        #     train_loss_list.append(train_loss/len(train_loader))
         train_loss = 0.0
         model.eval()
-        with torch.no_grad():
-            for _, ((obs, psf, alpha), gt) in enumerate(train_loader):
-                obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
-                rec = model(obs, psf, alpha)
-                loss = loss_fn(gt, rec)
-                train_loss += loss.item()
-            train_loss_list.append(train_loss/len(train_loader))
+        for _, ((obs, psf, alpha), gt) in enumerate(train_loader):
+            obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+            # Allow gradients for loss calculation but detach inputs
+            obs_d, psf_d, alpha_d = obs.detach(), psf.detach(), alpha.detach()
+            rec = model(obs_d, psf_d, alpha_d)
+            loss = loss_fn(rec, gt)
+            train_loss += loss.item()
+        train_loss_list.append(train_loss/len(train_loader))
         
+        # val_loss = 0.0
+        # model.eval()
+        # with torch.no_grad():
+        #     for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+        #         obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+        #         rec = model(obs, psf, alpha)
+        #         loss = loss_fn(gt, rec)
+        #         val_loss += loss.item()
+        #     val_loss_list.append(val_loss/len(val_loader))
         val_loss = 0.0
         model.eval()
-        with torch.no_grad():
-            for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
-                obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
-                rec = model(obs, psf, alpha)
-                loss = loss_fn(gt, rec)
-                val_loss += loss.item()
-            val_loss_list.append(val_loss/len(val_loader))
+        for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+            obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+            # Allow gradients for loss calculation but detach inputs
+            obs_d, psf_d, alpha_d = obs.detach(), psf.detach(), alpha.detach()
+            rec = model(obs_d, psf_d, alpha_d)
+            loss = loss_fn(rec, gt)
+            val_loss += loss.item()
+        val_loss_list.append(val_loss/len(val_loader))
 
         logger.info(" [{}: {}/{}]  train_loss={:.4g}  val_loss={:.4g}".format(
                         epoch+1, len(train_loader), len(train_loader),
