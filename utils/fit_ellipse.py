@@ -559,7 +559,7 @@ def laguerre_torch(n, x):
         grads = torch.autograd.grad(f.sum(), x, create_graph=True)[0]
         f = grads
 
-    n_factorial = math.factorial(n)
+    n_factorial = torch.exp(torch.lgamma(torch.tensor(n+1, dtype=torch.float32, device=x.device)))
     result = (torch.exp(x) / n_factorial) * f
     return result
 
