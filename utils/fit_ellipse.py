@@ -1,6 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
+import math
 
 def transform_tensor_batched(tensor):
     if tensor.dim() == 3:  # (B, H, W)
@@ -398,72 +399,6 @@ def normalize_images(batch):
     
     return normalized
 
-# def compute_moments(image_tensor):
-#     """
-#     Compute image moments for a batch of images.
-    
-#     Args:
-#         image_tensor: Tensor of shape [B, C, H, W]
-        
-#     Returns:
-#         moments_dict: Dictionary containing moment values for each image in the batch
-#     """
-#     image_tensor = normalize_images(image_tensor)
-    
-#     # Handle the channel dimension
-#     B, C, H, W = image_tensor.shape
-#     device = image_tensor.device
-    
-#     # If single-channel, squeeze the channel dimension for the calculations
-#     if C == 1:
-#         image_tensor = image_tensor.squeeze(1)
-#     else:
-#         # If multi-channel, convert to grayscale by averaging channels
-#         image_tensor = image_tensor.mean(dim=1)
-    
-#     # Prepare coordinate grids
-#     y_coords, x_coords = torch.meshgrid(
-#         torch.arange(H, device=device, dtype=torch.float32),
-#         torch.arange(W, device=device, dtype=torch.float32),
-#         indexing='ij'
-#     )
-    
-#     # List to store moments for each image
-#     batch_moments = []
-    
-#     for i in range(B):
-#         img = image_tensor[i]
-        
-#         # Zero-order moment (total intensity)
-#         m00 = torch.sum(img) + 1e-8
-            
-#         # First-order moments (for centroid)
-#         m10 = torch.sum(img * x_coords)
-#         m01 = torch.sum(img * y_coords)
-        
-#         # Centroid
-#         cx = m10 / m00
-#         cy = m01 / m00
-        
-#         # Central moments
-#         mu20 = torch.sum(img * (x_coords - cx)**2) / m00
-#         mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy)) / m00
-#         mu02 = torch.sum(img * (y_coords - cy)**2) / m00
-        
-#         # Store moments in a dictionary
-#         moments = {
-#             'm00': m00,
-#             'cx': cx,
-#             'cy': cy,
-#             'mu20': mu20,
-#             'mu11': mu11,
-#             'mu02': mu02
-#         }
-        
-#         batch_moments.append(moments)
-    
-#     return batch_moments
-
 def compute_moments(image_tensor):
     """
     Compute image moments up to order 3 for a batch of images.
@@ -600,3 +535,157 @@ def ellipse_params_from_moments(image_tensor):
         ellipse_params[i] = torch.tensor([cy, cx, theta, a, b], device=device)
     
     return ellipse_params
+
+def laguerre_torch(n, x):
+    """
+    Compute the Laguerre polynomial L_n(x) using automatic differentiation in PyTorch.
+    
+    Args:
+        n: Order of the Laguerre polynomial
+        x: Input tensor, requires_grad=True
+        
+    Returns:
+        Laguerre polynomial value L_n(x)
+    """
+    if not x.requires_grad:
+        x = x.clone().detach().requires_grad_(True)
+    
+    f = torch.exp(-x) * x**n  # Base function x^n * e^(-x)
+
+    # Compute the nth derivative
+    for _ in range(n):
+        if f.grad_fn is None:
+            return torch.zeros_like(x)
+        grads = torch.autograd.grad(f.sum(), x, create_graph=True)[0]
+        f = grads
+
+    n_factorial = math.factorial(n)
+    result = (torch.exp(x) / n_factorial) * f
+    return result
+
+def laguerre_shapelet(n, x):
+    """
+    Compute the Laguerre shapelet function.
+    
+    Args:
+        n: Order of the Laguerre polynomial
+        x: Input tensor
+        
+    Returns:
+        Laguerre shapelet function value
+    """
+    if not x.requires_grad:
+        x = x.clone().detach().requires_grad_(True)
+        
+    L_n = laguerre_torch(n, x)
+    
+    factorial_n = math.factorial(n)
+    return (1 / math.sqrt(factorial_n)) * torch.exp(-x / 2) * L_n
+
+def compute_shapelet_moments(image_tensor, max_order=4):
+    """
+    Compute Laguerre shapelet moments up to specified order for a batch of images.
+    
+    Args:
+        image_tensor: Tensor of shape [B, C, H, W]
+        max_order: Maximum order of moments to compute (default=4)
+        
+    Returns:
+        shapelet_moments_dict: Dictionary containing shapelet moment values for each image
+    """
+    image_tensor = normalize_images(image_tensor)
+    
+    # Handle the channel dimension
+    B, C, H, W = image_tensor.shape
+    device = image_tensor.device
+    
+    # If single-channel, squeeze the channel dimension
+    if C == 1:
+        image_tensor = image_tensor.squeeze(1)
+    else:
+        # If multi-channel, convert to grayscale by averaging channels
+        image_tensor = image_tensor.mean(dim=1)
+    
+    # Prepare coordinate grids
+    y_coords, x_coords = torch.meshgrid(
+        torch.arange(H, device=device, dtype=torch.float32),
+        torch.arange(W, device=device, dtype=torch.float32),
+        indexing='ij'
+    )
+    
+    # Center and scale coordinates
+    # First compute image centroids
+    batch_centroids = []
+    for i in range(B):
+        img = image_tensor[i]
+        m00 = torch.sum(img) + 1e-8
+        m10 = torch.sum(img * x_coords)
+        m01 = torch.sum(img * y_coords)
+        cx = m10 / m00
+        cy = m01 / m00
+        
+        # Compute radius for scaling
+        mu20 = torch.sum(img * (x_coords - cx)**2) / m00
+        mu02 = torch.sum(img * (y_coords - cy)**2) / m00
+        radius = 2 * torch.sqrt(mu20 + mu02)  # Use 2x standard deviation as radius
+        
+        batch_centroids.append((cx, cy, radius))
+    
+    # List to store shapelet moments for each image
+    batch_shapelet_moments = []
+    
+    for i in range(B):
+        img = image_tensor[i]
+        cx, cy, radius = batch_centroids[i]
+        
+        # Dictionary to store shapelet moments
+        moments = {}
+        
+        # Compute normalized radial distance for each pixel
+        # Scale by radius to normalize object size
+        r_squared = ((x_coords - cx)**2 + (y_coords - cy)**2) / (radius**2 + 1e-8)
+        r_squared.requires_grad_(True)  # Enable gradient tracking
+        
+        # Compute shapelet moments up to max_order
+        for n in range(max_order + 1):
+            # Second order shapelet moment
+            if n == 2:
+                shapelet_values = laguerre_shapelet(2, r_squared)
+                moment_value = torch.sum(img * shapelet_values) / torch.sum(img)
+                moments[f'S2'] = moment_value.item()
+            
+            # Fourth order shapelet moment
+            elif n == 4:
+                shapelet_values = laguerre_shapelet(4, r_squared)
+                moment_value = torch.sum(img * shapelet_values) / torch.sum(img)
+                moments[f'S4'] = moment_value.item()
+        
+        batch_shapelet_moments.append(moments)
+    
+    return batch_shapelet_moments
+
+def visualize_shapelet_basis(max_order=4, num_points=100):
+    """
+    Visualize the Laguerre shapelet basis functions.
+    
+    Args:
+        max_order: Maximum order to display
+        num_points: Number of points for visualization
+    """
+    r_vals = torch.linspace(0, 5, num_points, requires_grad=True)
+    
+    plt.figure(figsize=(10, 6))
+    for n in [2, 4]:  # Only show 2nd and 4th order
+        shapelet_vals = []
+        for r in r_vals:
+            val = laguerre_shapelet(n, torch.tensor([r**2], requires_grad=True))
+            shapelet_vals.append(val.item())
+        
+        plt.plot(r_vals.detach().numpy(), shapelet_vals, label=f'Ψ_{n}(r²)')
+    
+    plt.xlabel('r² (Squared Radial Distance)')
+    plt.ylabel('Shapelet Value')
+    plt.title('Laguerre Shapelet Basis Functions')
+    plt.legend()
+    plt.grid(True)
+    plt.show()

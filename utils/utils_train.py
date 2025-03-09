@@ -3,7 +3,7 @@ import torch
 import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched, ellipse_fit_metric, compute_moments
+from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched, ellipse_fit_metric, compute_moments, compute_shapelet_moments
 
 
 # import utils.cadmos_lib as cl
@@ -250,6 +250,73 @@ class MomentBasedLoss(nn.Module):
             self.central_moments_weight * central_moments_loss +
             self.third_order_weight * third_order_loss
         )
+        
+        return total_loss
+    
+class ShapeletMomentsLoss(nn.Module):
+    def __init__(self, s2_weight=1.0, s4_weight=1.0, combined_weight=1.0):
+        """
+        Initializes the Shapelet Moments Loss function.
+        
+        Args:
+            s2_weight: Weight for the 2nd order shapelet moment loss
+            s4_weight: Weight for the 4th order shapelet moment loss
+            combined_weight: Overall weight for the shapelet loss term
+        """
+        super(ShapeletMomentsLoss, self).__init__()
+        self.s2_weight = s2_weight
+        self.s4_weight = s4_weight
+        self.combined_weight = combined_weight
+    
+    def forward(self, output, target):
+        """
+        Computes the loss between output and target based on shapelet moments.
+        
+        Args:
+            output: Model output tensor of shape [B, C, H, W]
+            target: Ground truth tensor of shape [B, C, H, W]
+            
+        Returns:
+            total_loss: The weighted shapelet moments loss
+        """
+        # Use the compute_shapelet_moments function to get moments
+        output_batch_moments = compute_shapelet_moments(output)
+        target_batch_moments = compute_shapelet_moments(target)
+        
+        # Extract device for tensor creation
+        device = output.device
+        B = len(output_batch_moments)
+        
+        # Prepare tensors for comparison
+        output_s2 = torch.zeros(B, device=device)
+        target_s2 = torch.zeros(B, device=device)
+        output_s4 = torch.zeros(B, device=device)
+        target_s4 = torch.zeros(B, device=device)
+        
+        # Convert moment dictionaries to tensors
+        for i in range(B):
+            output_moments = output_batch_moments[i]
+            target_moments = target_batch_moments[i]
+            
+            # Store 2nd order shapelet moment
+            output_s2[i] = output_moments['S2']
+            target_s2[i] = target_moments['S2']
+            
+            # Store 4th order shapelet moment
+            output_s4[i] = output_moments['S4']
+            target_s4[i] = target_moments['S4']
+        
+        # 2nd order shapelet moment loss
+        s2_loss = F.mse_loss(output_s2, target_s2)
+        
+        # 4th order shapelet moment loss
+        s4_loss = F.mse_loss(output_s4, target_s4)
+        
+        # Total shapelet moments loss with weighting
+        shapelet_loss = self.s2_weight * s2_loss + self.s4_weight * s4_loss
+        
+        # Apply combined weight
+        total_loss = self.combined_weight * shapelet_loss
         
         return total_loss
 
