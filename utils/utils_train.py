@@ -283,42 +283,39 @@ class ShapeletMomentsLoss(nn.Module):
         output_batch_moments = compute_shapelet_moments(output)
         target_batch_moments = compute_shapelet_moments(target)
         
-        # Extract device for tensor creation
-        device = output.device
         B = len(output_batch_moments)
         
-        # Prepare tensors for comparison
-        output_s2 = torch.zeros(B, device=device)
-        target_s2 = torch.zeros(B, device=device)
-        output_s4 = torch.zeros(B, device=device)
-        target_s4 = torch.zeros(B, device=device)
+        # Instead of creating new tensors, directly use the values from the moments
+        s2_losses = []
+        s4_losses = []
         
-        # Convert moment dictionaries to tensors
         for i in range(B):
             output_moments = output_batch_moments[i]
             target_moments = target_batch_moments[i]
             
-            # Store 2nd order shapelet moment
-            output_s2[i] = output_moments['S2']
-            target_s2[i] = target_moments['S2']
+            # Compute individual losses directly from the moment values
+            # This maintains gradient flow
+            s2_loss_i = (output_moments['S2'] - target_moments['S2']) ** 2
+            s4_loss_i = (output_moments['S4'] - target_moments['S4']) ** 2
             
-            # Store 4th order shapelet moment
-            output_s4[i] = output_moments['S4']
-            target_s4[i] = target_moments['S4']
+            s2_losses.append(s2_loss_i)
+            s4_losses.append(s4_loss_i)
         
-        # 2nd order shapelet moment loss
-        s2_loss = F.mse_loss(output_s2, target_s2)
-        
-        # 4th order shapelet moment loss
-        s4_loss = F.mse_loss(output_s4, target_s4)
-        
-        # Total shapelet moments loss with weighting
-        shapelet_loss = self.s2_weight * s2_loss + self.s4_weight * s4_loss
-        
-        # Apply combined weight
-        total_loss = self.combined_weight * shapelet_loss
-        
-        return total_loss
+        # Stack losses and take mean
+        if s2_losses:
+            s2_loss = torch.stack(s2_losses).mean()
+            s4_loss = torch.stack(s4_losses).mean()
+            
+            # Total shapelet moments loss with weighting
+            shapelet_loss = self.s2_weight * s2_loss + self.s4_weight * s4_loss
+            
+            # Apply combined weight
+            total_loss = self.combined_weight * shapelet_loss
+            
+            return total_loss
+        else:
+            # Return zero loss if batch is empty (edge case)
+            return torch.tensor(0.0, device=output.device, requires_grad=True)
 
 class MultiScaleLoss(nn.Module):
     def __init__(self, scales=3, norm='L1', aux_loss_fn=None, aux_weight=0.1):
