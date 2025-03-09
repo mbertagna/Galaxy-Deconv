@@ -652,13 +652,15 @@ def compute_shapelet_moments(image_tensor, max_order=4):
             if n == 2:
                 shapelet_values = laguerre_shapelet(2, r_squared)
                 moment_value = torch.sum(img * shapelet_values) / torch.sum(img)
-                moments[f'S2'] = moment_value.item()
+                # FIXED: Don't use .item() which detaches the tensor
+                moments[f'S2'] = moment_value
             
             # Fourth order shapelet moment
             elif n == 4:
                 shapelet_values = laguerre_shapelet(4, r_squared)
                 moment_value = torch.sum(img * shapelet_values) / torch.sum(img)
-                moments[f'S4'] = moment_value.item()
+                # FIXED: Don't use .item() which detaches the tensor
+                moments[f'S4'] = moment_value
         
         batch_shapelet_moments.append(moments)
     
