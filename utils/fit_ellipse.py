@@ -537,48 +537,12 @@ def ellipse_params_from_moments(image_tensor):
     return ellipse_params
 
 def laguerre_torch(n, x):
-    """
-    Compute the Laguerre polynomial L_n(x) using automatic differentiation in PyTorch.
-    
-    Args:
-        n: Order of the Laguerre polynomial
-        x: Input tensor, requires_grad=True
-        
-    Returns:
-        Laguerre polynomial value L_n(x)
-    """
-    if not x.requires_grad:
-        x = x.clone().detach().requires_grad_(True)
-    
-    f = torch.exp(-x) * x**n  # Base function x^n * e^(-x)
-    
-    # Check for NaNs
-    if torch.isnan(f).any():
-        print(f"NaN detected in laguerre_torch base function for n={n}")
-        return torch.zeros_like(x)
-
-    # Compute the nth derivative
-    for i in range(n):
-        if f.grad_fn is None:
-            return torch.zeros_like(x)
-        grads = torch.autograd.grad(f.sum(), x, create_graph=True)[0]
-        
-        # Check for NaNs in gradient
-        if torch.isnan(grads).any():
-            print(f"NaN detected in laguerre_torch gradient at iteration {i} for n={n}")
-            return torch.zeros_like(x)
-            
-        f = grads
-
-    n_factorial = torch.exp(torch.lgamma(torch.tensor(n+1, dtype=torch.float32, device=x.device)))
-    result = (torch.exp(x) / n_factorial) * f
-    
-    # Final NaN check
-    if torch.isnan(result).any():
-        print(f"NaN detected in laguerre_torch final result for n={n}")
-        return torch.zeros_like(x)
-        
-    return result
+    if n == 2:
+        return (x**2 - 4 * x + 2) / 2.0
+    elif n == 4:
+        return (x**4 - 16 * x**3 + 72 * x**2 - 96 * x + 24) / 24.0
+    else:
+        raise NotImplementedError("Only n=2 and 4 are supported.")
 
 def laguerre_shapelet(n, x):
     """

@@ -1,0 +1,434 @@
+task:
+"I am working on a custom loss function for a deconvolution neural network. When I train with my newest version, my loss values become nan after some time. I would would to pinpoint the exact cause by checking for nans after each operation. please create new version of each file with nan checking added."
+
+issue:
+"
+INFO:Train: Start training Gaussian_PnP_ADMM_2iters_ShapeletMomentsLoss on /home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv data for 10 epochs.
+INFO:Dataset: Successfully constructed train dataset. Total Samples: 40000.
+INFO:Train: [1: 25/1125]  train_loss=345.4  val_loss=416.3
+INFO:Train: [1: 50/1125]  train_loss=282.7  val_loss=240.5
+INFO:Train: [1: 75/1125]  train_loss=77.79  val_loss=220.3
+INFO:Train: [1: 100/1125]  train_loss=94.07  val_loss=166.3
+INFO:Train: [1: 125/1125]  train_loss=34.36  val_loss=130.6
+INFO:Train: [1: 150/1125]  train_loss=51.93  val_loss=82.9
+INFO:Train: [1: 175/1125]  train_loss=83.05  val_loss=105.3
+INFO:Train: [1: 200/1125]  train_loss=24.17  val_loss=62.08
+INFO:Train: [1: 225/1125]  train_loss=45.2  val_loss=60.99
+INFO:Train: [1: 250/1125]  train_loss=16.63  val_loss=48.82
+INFO:Train: [1: 275/1125]  train_loss=14.8  val_loss=47.21
+INFO:Train: [1: 300/1125]  train_loss=19.79  val_loss=77.06
+INFO:Train: [1: 325/1125]  train_loss=84.01  val_loss=45.43
+INFO:Train: [1: 350/1125]  train_loss=nan  val_loss=nan
+INFO:Train: [1: 375/1125]  train_loss=nan  val_loss=nan
+"
+
+code:
+fit_ellipse.py:
+"
+def laguerre_torch(n, x):
+    """
+    Compute the Laguerre polynomial L_n(x) using automatic differentiation in PyTorch.
+    
+    Args:
+        n: Order of the Laguerre polynomial
+        x: Input tensor, requires_grad=True
+        
+    Returns:
+        Laguerre polynomial value L_n(x)
+    """
+    if not x.requires_grad:
+        x = x.clone().detach().requires_grad_(True)
+    
+    f = torch.exp(-x) * x**n  # Base function x^n * e^(-x)
+
+    # Compute the nth derivative
+    for _ in range(n):
+        if f.grad_fn is None:
+            return torch.zeros_like(x)
+        grads = torch.autograd.grad(f.sum(), x, create_graph=True)[0]
+        f = grads
+
+    n_factorial = torch.exp(torch.lgamma(torch.tensor(n+1, dtype=torch.float32, device=x.device)))
+    result = (torch.exp(x) / n_factorial) * f
+    return result
+
+def laguerre_shapelet(n, x):
+    """
+    Compute the Laguerre shapelet function.
+    
+    Args:
+        n: Order of the Laguerre polynomial
+        x: Input tensor
+        
+    Returns:
+        Laguerre shapelet function value
+    """
+    if not x.requires_grad:
+        x = x.clone().detach().requires_grad_(True)
+        
+    L_n = laguerre_torch(n, x)
+    
+    factorial_n = math.factorial(n)
+    return (1 / math.sqrt(factorial_n)) * torch.exp(-x / 2) * L_n
+
+def compute_shapelet_moments(image_tensor, max_order=4):
+    """
+    Compute Laguerre shapelet moments up to specified order for a batch of images.
+    
+    Args:
+        image_tensor: Tensor of shape [B, C, H, W]
+        max_order: Maximum order of moments to compute (default=4)
+        
+    Returns:
+        shapelet_moments_dict: Dictionary containing shapelet moment values for each image
+    """
+    image_tensor = normalize_images(image_tensor)
+    
+    # Handle the channel dimension
+    B, C, H, W = image_tensor.shape
+    device = image_tensor.device
+    
+    # If single-channel, squeeze the channel dimension
+    if C == 1:
+        image_tensor = image_tensor.squeeze(1)
+    else:
+        # If multi-channel, convert to grayscale by averaging channels
+        image_tensor = image_tensor.mean(dim=1)
+    
+    # Prepare coordinate grids
+    y_coords, x_coords = torch.meshgrid(
+        torch.arange(H, device=device, dtype=torch.float32),
+        torch.arange(W, device=device, dtype=torch.float32),
+        indexing='ij'
+    )
+    
+    # Center and scale coordinates
+    # First compute image centroids
+    batch_centroids = []
+    for i in range(B):
+        img = image_tensor[i]
+        m00 = torch.sum(img) + 1e-8
+        m10 = torch.sum(img * x_coords)
+        m01 = torch.sum(img * y_coords)
+        cx = m10 / m00
+        cy = m01 / m00
+        
+        # Compute radius for scaling
+        mu20 = torch.sum(img * (x_coords - cx)**2) / m00
+        mu02 = torch.sum(img * (y_coords - cy)**2) / m00
+        radius = 2 * torch.sqrt(mu20 + mu02)  # Use 2x standard deviation as radius
+        
+        batch_centroids.append((cx, cy, radius))
+    
+    # List to store shapelet moments for each image
+    batch_shapelet_moments = []
+    
+    for i in range(B):
+        img = image_tensor[i]
+        cx, cy, radius = batch_centroids[i]
+        
+        # Dictionary to store shapelet moments
+        moments = {}
+        
+        # Compute normalized radial distance for each pixel
+        # Scale by radius to normalize object size
+        r_squared = ((x_coords - cx)**2 + (y_coords - cy)**2) / (radius**2 + 1e-8)
+        r_squared.requires_grad_(True)  # Enable gradient tracking
+        
+        # Compute shapelet moments up to max_order
+        for n in range(max_order + 1):
+            # Second order shapelet moment
+            if n == 2:
+                shapelet_values = laguerre_shapelet(2, r_squared)
+                moment_value = (torch.sum(img * shapelet_values)
+                                #  / torch.sum(img)
+                                 )
+                # FIXED: Don't use .item() which detaches the tensor
+                moments[f'S2'] = moment_value
+            
+            # Fourth order shapelet moment
+            elif n == 4:
+                shapelet_values = laguerre_shapelet(4, r_squared)
+                moment_value = (torch.sum(img * shapelet_values)
+                                #  / torch.sum(img)
+                                 )
+                # FIXED: Don't use .item() which detaches the tensor
+                moments[f'S4'] = moment_value
+        
+        batch_shapelet_moments.append(moments)
+    
+    return batch_shapelet_moments
+"
+
+utils_train.py:
+"
+class ShapeletMomentsLoss(nn.Module):
+    def __init__(self, s2_weight=1.0, s4_weight=1.0, combined_weight=1.0):
+        """
+        Initializes the Shapelet Moments Loss function.
+        
+        Args:
+            s2_weight: Weight for the 2nd order shapelet moment loss
+            s4_weight: Weight for the 4th order shapelet moment loss
+            combined_weight: Overall weight for the shapelet loss term
+        """
+        super(ShapeletMomentsLoss, self).__init__()
+        self.s2_weight = s2_weight
+        self.s4_weight = s4_weight
+        self.combined_weight = combined_weight
+    
+    def forward(self, output, target):
+        """
+        Computes the loss between output and target based on shapelet moments.
+        
+        Args:
+            output: Model output tensor of shape [B, C, H, W]
+            target: Ground truth tensor of shape [B, C, H, W]
+            
+        Returns:
+            total_loss: The weighted shapelet moments loss
+        """
+        # Use the compute_shapelet_moments function to get moments
+        output_batch_moments = compute_shapelet_moments(output)
+        target_batch_moments = compute_shapelet_moments(target)
+        
+        B = len(output_batch_moments)
+        
+        # Instead of creating new tensors, directly use the values from the moments
+        s2_losses = []
+        s4_losses = []
+        
+        for i in range(B):
+            output_moments = output_batch_moments[i]
+            target_moments = target_batch_moments[i]
+            
+            # Compute individual losses directly from the moment values
+            # This maintains gradient flow
+            s2_loss_i = (output_moments['S2'] - target_moments['S2']) ** 2
+            s4_loss_i = (output_moments['S4'] - target_moments['S4']) ** 2
+            
+            s2_losses.append(s2_loss_i)
+            s4_losses.append(s4_loss_i)
+        
+        # Stack losses and take mean
+        if s2_losses:
+            s2_loss = torch.stack(s2_losses).mean()
+            s4_loss = torch.stack(s4_losses).mean()
+            
+            # Total shapelet moments loss with weighting
+            shapelet_loss = self.s2_weight * s2_loss + self.s4_weight * s4_loss
+            
+            # Apply combined weight
+            total_loss = self.combined_weight * shapelet_loss
+            
+            return total_loss
+        else:
+            # Return zero loss if batch is empty (edge case)
+            return torch.tensor(0.0, device=output.device, requires_grad=True)
+"
+
+train.py:
+"
+import argparse
+import logging
+import os
+import numpy as np
+
+import torch
+from torch.optim import Adam
+
+from models.ResUNet import ResUNet
+from models.Tikhonet import Tikhonet
+from models.Unrolled_ADMM import Unrolled_ADMM
+from models.unrolled_admm_gaussian import UnrolledADMMGaussian
+from utils.utils_data import get_dataloader
+from utils.utils_plot import plot_loss
+from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, BestEllipseLoss, MomentBasedLoss, ShapeletMomentsLoss
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove_SubNet=False, filter='Laplacian',
+          n_epochs=10, lr=1e-4, loss='MultiScale',
+          data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train_val_split=0.8, batch_size=32,
+          model_save_path='./saved_models/', pretrained_epochs=0):
+    
+    model_name = get_model_name(method=model_name, loss=loss, filter=filter, n_iters=n_iters, llh=llh, PnP=PnP, remove_SubNet=remove_SubNet)
+    logger = logging.getLogger('Train')
+    logger.info(' Start training %s on %s data for %s epochs.', model_name, data_path, n_epochs)
+    
+    if not os.path.exists(model_save_path):
+        os.mkdir(model_save_path)
+    
+    train_loader, val_loader = get_dataloader(data_path=data_path, train=True, train_val_split=train_val_split, batch_size=batch_size, num_workers=0)
+    
+    if 'ADMM' in model_name:
+        # model = Unrolled_ADMM(n_iters=n_iters, llh=llh, PnP=PnP, subnet=not remove_SubNet)
+        model = UnrolledADMMGaussian(n_iters=n_iters, PnP=PnP, subnet=True)
+    elif 'Tikhonet' in model_name:
+        model = Tikhonet(filter=filter)
+    elif 'ShapeNet' in model_name:
+        model = Tikhonet(filter=filter)
+    elif model_name == 'ResUNet':
+        model = ResUNet()
+
+    model.to(device)
+    if pretrained_epochs > 0:
+        try:
+            pretrained_file = os.path.join(model_save_path, f'{model_name}_{pretrained_epochs}epochs.pth')
+            model.load_state_dict(torch.load(pretrained_file, map_location=torch.device(device)))
+            logger.info(' Successfully loaded in %s.', pretrained_file)
+        except:
+            raise Exception(' Failed loading in %s!', pretrained_file)
+
+    if 'ShapeNet' in model_name or loss == 'Shape':
+        loss_fn = ShapeConstraint(device=device, fov_pixels=48, n_shearlet=2, gamma=1)
+    elif loss == 'MSE':
+        loss_fn = torch.nn.MSELoss()
+    elif loss == 'MultiScale':
+        loss_fn = MultiScaleLoss()
+    elif loss == 'BestEllipse':
+        step = 0.025
+        pps = np.arange(start=0.3, stop=0.7+step, step=step)
+        loss_fn = BestEllipseLoss(
+            ellipse_levels=pps,
+            center_weight=1.0,
+            angle_weight=1.0,
+            axis_weight=1.0,
+        )
+    elif loss == 'ShapeletMomentsLoss':
+        loss_fn = ShapeletMomentsLoss()
+    
+    optimizer = Adam(params=model.parameters(), lr = lr)
+
+    train_loss_list, val_loss_list = [], []
+    val_loss_min, epoch_min = 1.e9, 0
+    for epoch in range(n_epochs):
+        train_loss = 0.0
+        for idx, ((obs, psf, alpha), gt) in enumerate(train_loader):
+            model.train()
+            optimizer.zero_grad()
+            obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+            rec = model(obs, psf, alpha)
+            loss = loss_fn(gt, rec)
+
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            train_loss = loss.item()
+            
+            # Evaluate on valid dataset.
+            # if (idx+1) % 25 == 0:
+            #     val_loss = 0.0
+            #     model.eval()
+            #     with torch.no_grad():
+            #         for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+            #             obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+            #             rec = model(obs, psf, alpha)
+            #             loss = loss_fn(gt, rec)
+            #             val_loss += loss.item()
+
+            if (idx+1) % 25 == 0:
+                val_loss = 0.0
+                model.eval()
+                for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+                    obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+                    # Allow gradients for loss calculation but detach inputs
+                    obs_d, psf_d, alpha_d = obs.detach(), psf.detach(), alpha.detach()
+                    rec = model(obs_d, psf_d, alpha_d)
+                    loss = loss_fn(rec, gt)
+                    val_loss += loss.item()
+
+                logger.info(" [{}: {}/{}]  train_loss={:.4g}  val_loss={:.4g}".format(
+                                epoch+1, idx+1, len(train_loader),
+                                train_loss,
+                                val_loss/len(val_loader)))
+    
+        # Evaluate on train & valid dataset after every epoch.
+        # train_loss = 0.0
+        # model.eval()
+        # with torch.no_grad():
+        #     for _, ((obs, psf, alpha), gt) in enumerate(train_loader):
+        #         obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+        #         rec = model(obs, psf, alpha)
+        #         loss = loss_fn(gt, rec)
+        #         train_loss += loss.item()
+        #     train_loss_list.append(train_loss/len(train_loader))
+        train_loss = 0.0
+        model.eval()
+        for _, ((obs, psf, alpha), gt) in enumerate(train_loader):
+            obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+            # Allow gradients for loss calculation but detach inputs
+            obs_d, psf_d, alpha_d = obs.detach(), psf.detach(), alpha.detach()
+            rec = model(obs_d, psf_d, alpha_d)
+            loss = loss_fn(rec, gt)
+            train_loss += loss.item()
+        train_loss_list.append(train_loss/len(train_loader))
+        
+        # val_loss = 0.0
+        # model.eval()
+        # with torch.no_grad():
+        #     for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+        #         obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+        #         rec = model(obs, psf, alpha)
+        #         loss = loss_fn(gt, rec)
+        #         val_loss += loss.item()
+        #     val_loss_list.append(val_loss/len(val_loader))
+        val_loss = 0.0
+        model.eval()
+        for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+            obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+            # Allow gradients for loss calculation but detach inputs
+            obs_d, psf_d, alpha_d = obs.detach(), psf.detach(), alpha.detach()
+            rec = model(obs_d, psf_d, alpha_d)
+            loss = loss_fn(rec, gt)
+            val_loss += loss.item()
+        val_loss_list.append(val_loss/len(val_loader))
+
+        logger.info(" [{}: {}/{}]  train_loss={:.4g}  val_loss={:.4g}".format(
+                        epoch+1, len(train_loader), len(train_loader),
+                        train_loss/len(train_loader),
+                        val_loss/len(val_loader)))
+        
+        # Save model.
+        if val_loss_min > val_loss or (epoch + 1) % 5 == 0:
+            if val_loss_min > val_loss:
+                val_loss_min = val_loss
+                epoch_min = epoch
+            model_file_name = f'{model_name}_{epoch+1+pretrained_epochs}epochs.pth'
+            torch.save(model.state_dict(), os.path.join(model_save_path, model_file_name))
+            logger.info(' Model saved to %s', os.path.join(model_save_path, model_file_name))
+
+        # Plot loss curve.
+        plot_loss(train_loss_list, val_loss_list, epoch_min, model_save_path, model_name)
+
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser(description='Arguments for training.')
+    parser.add_argument('--n_iters', type=int, default=8)
+    parser.add_argument('--model', type=str, default='Unrolled_ADMM', choices=['Unrolled_ADMM', 'Tikhonet', 'ShapeNet', 'ResUNet'])
+    parser.add_argument('--llh', type=str, default='Gaussian', choices=['Gaussian', 'Poisson'])
+    parser.add_argument('--remove_SubNet', action="store_true")
+    parser.add_argument('--filter', type=str, default='Laplacian', choices=['Identity', 'Laplacian'])
+    parser.add_argument('--n_epochs', type=int, default=50)
+    parser.add_argument('--lr', type=float, default=2e-4)
+    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss'])
+    parser.add_argument('--train_val_split', type=float, default=0.9)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--pretrained_epochs', type=int, default=0)
+    opt = parser.parse_args()
+
+
+    train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
+          n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss,
+          data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
+          model_save_path='./saved_models_ellipse_loss/', pretrained_epochs=opt.pretrained_epochs)
+"
