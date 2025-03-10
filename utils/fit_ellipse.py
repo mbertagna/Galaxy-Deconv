@@ -551,16 +551,33 @@ def laguerre_torch(n, x):
         x = x.clone().detach().requires_grad_(True)
     
     f = torch.exp(-x) * x**n  # Base function x^n * e^(-x)
+    
+    # Check for NaNs
+    if torch.isnan(f).any():
+        print(f"NaN detected in laguerre_torch base function for n={n}")
+        return torch.zeros_like(x)
 
     # Compute the nth derivative
-    for _ in range(n):
+    for i in range(n):
         if f.grad_fn is None:
             return torch.zeros_like(x)
         grads = torch.autograd.grad(f.sum(), x, create_graph=True)[0]
+        
+        # Check for NaNs in gradient
+        if torch.isnan(grads).any():
+            print(f"NaN detected in laguerre_torch gradient at iteration {i} for n={n}")
+            return torch.zeros_like(x)
+            
         f = grads
 
     n_factorial = torch.exp(torch.lgamma(torch.tensor(n+1, dtype=torch.float32, device=x.device)))
     result = (torch.exp(x) / n_factorial) * f
+    
+    # Final NaN check
+    if torch.isnan(result).any():
+        print(f"NaN detected in laguerre_torch final result for n={n}")
+        return torch.zeros_like(x)
+        
     return result
 
 def laguerre_shapelet(n, x):
@@ -576,11 +593,30 @@ def laguerre_shapelet(n, x):
     """
     if not x.requires_grad:
         x = x.clone().detach().requires_grad_(True)
+    
+    # Check for NaNs in input
+    if torch.isnan(x).any():
+        print(f"NaN detected in input to laguerre_shapelet for n={n}")
+        return torch.zeros_like(x)
         
     L_n = laguerre_torch(n, x)
     
+    # Check for NaNs after Laguerre polynomial
+    if torch.isnan(L_n).any():
+        print(f"NaN detected in Laguerre polynomial L_{n} output")
+        return torch.zeros_like(x)
+    
     factorial_n = math.factorial(n)
-    return (1 / math.sqrt(factorial_n)) * torch.exp(-x / 2) * L_n
+    result = (1 / math.sqrt(factorial_n)) * torch.exp(-x / 2) * L_n
+    
+    # Check for NaNs in result
+    if torch.isnan(result).any():
+        print(f"NaN detected in laguerre_shapelet final result for n={n}")
+        print(f"Factor: {1 / math.sqrt(factorial_n)}")
+        print(f"Min/max of x: {x.min().item()}, {x.max().item()}")
+        return torch.zeros_like(x)
+        
+    return result
 
 def compute_shapelet_moments(image_tensor, max_order=4):
     """
@@ -593,7 +629,19 @@ def compute_shapelet_moments(image_tensor, max_order=4):
     Returns:
         shapelet_moments_dict: Dictionary containing shapelet moment values for each image
     """
+    # Check for NaNs in input
+    if torch.isnan(image_tensor).any():
+        print("NaN detected in input to compute_shapelet_moments")
+        # Find which batch elements contain NaNs
+        for b in range(image_tensor.shape[0]):
+            if torch.isnan(image_tensor[b]).any():
+                print(f"  NaN found in batch element {b}")
+    
     image_tensor = normalize_images(image_tensor)
+    
+    # Check for NaNs after normalization
+    if torch.isnan(image_tensor).any():
+        print("NaN detected after normalize_images in compute_shapelet_moments")
     
     # Handle the channel dimension
     B, C, H, W = image_tensor.shape
@@ -605,6 +653,10 @@ def compute_shapelet_moments(image_tensor, max_order=4):
     else:
         # If multi-channel, convert to grayscale by averaging channels
         image_tensor = image_tensor.mean(dim=1)
+    
+    # Check for NaNs after channel handling
+    if torch.isnan(image_tensor).any():
+        print("NaN detected after channel handling in compute_shapelet_moments")
     
     # Prepare coordinate grids
     y_coords, x_coords = torch.meshgrid(
@@ -618,17 +670,49 @@ def compute_shapelet_moments(image_tensor, max_order=4):
     batch_centroids = []
     for i in range(B):
         img = image_tensor[i]
+        
+        # Check for NaNs in current image
+        if torch.isnan(img).any():
+            print(f"NaN detected in image {i} before centroid calculation")
+            
         m00 = torch.sum(img) + 1e-8
+        
+        # Check for small or NaN m00
+        if m00 < 1e-6 or torch.isnan(m00):
+            print(f"Warning: Very small or NaN m00 ({m00.item()}) for image {i}")
+            
         m10 = torch.sum(img * x_coords)
         m01 = torch.sum(img * y_coords)
+        
         cx = m10 / m00
         cy = m01 / m00
+        
+        # Check for NaN centroids
+        if torch.isnan(cx) or torch.isnan(cy):
+            print(f"NaN detected in centroids for image {i}: cx={cx.item()}, cy={cy.item()}")
+            print(f"  m00={m00.item()}, m10={m10.item()}, m01={m01.item()}")
+            # Use fallback values to avoid propagating NaNs
+            cx = H / 2
+            cy = W / 2
         
         # Compute radius for scaling
         mu20 = torch.sum(img * (x_coords - cx)**2) / m00
         mu02 = torch.sum(img * (y_coords - cy)**2) / m00
+        
+        # Check for NaN moments
+        if torch.isnan(mu20) or torch.isnan(mu02):
+            print(f"NaN detected in moments for image {i}: mu20={mu20.item()}, mu02={mu02.item()}")
+            # Use fallback values
+            mu20 = torch.tensor(1.0, device=device)
+            mu02 = torch.tensor(1.0, device=device)
+            
         radius = 2 * torch.sqrt(mu20 + mu02)  # Use 2x standard deviation as radius
         
+        # Check for small or NaN radius
+        if radius < 1e-6 or torch.isnan(radius):
+            print(f"Warning: Very small or NaN radius ({radius.item()}) for image {i}")
+            radius = torch.tensor(1.0, device=device)  # Use fallback value
+            
         batch_centroids.append((cx, cy, radius))
     
     # List to store shapelet moments for each image
@@ -644,6 +728,13 @@ def compute_shapelet_moments(image_tensor, max_order=4):
         # Compute normalized radial distance for each pixel
         # Scale by radius to normalize object size
         r_squared = ((x_coords - cx)**2 + (y_coords - cy)**2) / (radius**2 + 1e-8)
+        
+        # Check for NaNs in r_squared
+        if torch.isnan(r_squared).any():
+            print(f"NaN detected in r_squared for image {i}")
+            print(f"  cx={cx.item()}, cy={cy.item()}, radius={radius.item()}")
+            continue  # Skip this image
+            
         r_squared.requires_grad_(True)  # Enable gradient tracking
         
         # Compute shapelet moments up to max_order
@@ -651,19 +742,37 @@ def compute_shapelet_moments(image_tensor, max_order=4):
             # Second order shapelet moment
             if n == 2:
                 shapelet_values = laguerre_shapelet(2, r_squared)
-                moment_value = (torch.sum(img * shapelet_values)
-                                #  / torch.sum(img)
-                                 )
-                # FIXED: Don't use .item() which detaches the tensor
+                
+                # Check for NaNs in shapelet values
+                if torch.isnan(shapelet_values).any():
+                    print(f"NaN detected in S2 shapelet values for image {i}")
+                    shapelet_values = torch.zeros_like(r_squared)
+                
+                moment_value = torch.sum(img * shapelet_values)
+                
+                # Check for NaNs in moment value
+                if torch.isnan(moment_value):
+                    print(f"NaN detected in S2 moment value for image {i}")
+                    moment_value = torch.tensor(0.0, device=device, requires_grad=True)
+                    
                 moments[f'S2'] = moment_value
             
             # Fourth order shapelet moment
             elif n == 4:
                 shapelet_values = laguerre_shapelet(4, r_squared)
-                moment_value = (torch.sum(img * shapelet_values)
-                                #  / torch.sum(img)
-                                 )
-                # FIXED: Don't use .item() which detaches the tensor
+                
+                # Check for NaNs in shapelet values
+                if torch.isnan(shapelet_values).any():
+                    print(f"NaN detected in S4 shapelet values for image {i}")
+                    shapelet_values = torch.zeros_like(r_squared)
+                
+                moment_value = torch.sum(img * shapelet_values)
+                
+                # Check for NaNs in moment value
+                if torch.isnan(moment_value):
+                    print(f"NaN detected in S4 moment value for image {i}")
+                    moment_value = torch.tensor(0.0, device=device, requires_grad=True)
+                    
                 moments[f'S4'] = moment_value
         
         batch_shapelet_moments.append(moments)

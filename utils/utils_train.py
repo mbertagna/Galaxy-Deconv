@@ -279,6 +279,19 @@ class ShapeletMomentsLoss(nn.Module):
         Returns:
             total_loss: The weighted shapelet moments loss
         """
+        # Check for NaNs in input tensors
+        if torch.isnan(output).any():
+            print("NaN detected in output tensor in ShapeletMomentsLoss")
+            for b in range(output.shape[0]):
+                if torch.isnan(output[b]).any():
+                    print(f"  NaN found in output batch element {b}")
+        
+        if torch.isnan(target).any():
+            print("NaN detected in target tensor in ShapeletMomentsLoss")
+            for b in range(target.shape[0]):
+                if torch.isnan(target[b]).any():
+                    print(f"  NaN found in target batch element {b}")
+        
         # Use the compute_shapelet_moments function to get moments
         output_batch_moments = compute_shapelet_moments(output)
         target_batch_moments = compute_shapelet_moments(target)
@@ -293,10 +306,32 @@ class ShapeletMomentsLoss(nn.Module):
             output_moments = output_batch_moments[i]
             target_moments = target_batch_moments[i]
             
+            # Check if moments exist
+            if 'S2' not in output_moments or 'S2' not in target_moments:
+                print(f"Missing S2 moment for batch element {i}")
+                continue
+                
+            if 'S4' not in output_moments or 'S4' not in target_moments:
+                print(f"Missing S4 moment for batch element {i}")
+                continue
+            
             # Compute individual losses directly from the moment values
             # This maintains gradient flow
             s2_loss_i = (output_moments['S2'] - target_moments['S2']) ** 2
             s4_loss_i = (output_moments['S4'] - target_moments['S4']) ** 2
+            
+            # Check for NaNs in individual losses
+            if torch.isnan(s2_loss_i):
+                print(f"NaN detected in S2 loss for batch element {i}")
+                print(f"  output S2: {output_moments['S2'].item() if not torch.isnan(output_moments['S2']) else 'NaN'}")
+                print(f"  target S2: {target_moments['S2'].item() if not torch.isnan(target_moments['S2']) else 'NaN'}")
+                continue
+                
+            if torch.isnan(s4_loss_i):
+                print(f"NaN detected in S4 loss for batch element {i}")
+                print(f"  output S4: {output_moments['S4'].item() if not torch.isnan(output_moments['S4']) else 'NaN'}")
+                print(f"  target S4: {target_moments['S4'].item() if not torch.isnan(target_moments['S4']) else 'NaN'}")
+                continue
             
             s2_losses.append(s2_loss_i)
             s4_losses.append(s4_loss_i)
@@ -306,15 +341,37 @@ class ShapeletMomentsLoss(nn.Module):
             s2_loss = torch.stack(s2_losses).mean()
             s4_loss = torch.stack(s4_losses).mean()
             
+            # Check for NaNs in aggregated losses
+            if torch.isnan(s2_loss):
+                print("NaN detected in aggregated S2 loss")
+                s2_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
+                
+            if torch.isnan(s4_loss):
+                print("NaN detected in aggregated S4 loss")
+                s4_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
+            
             # Total shapelet moments loss with weighting
             shapelet_loss = self.s2_weight * s2_loss + self.s4_weight * s4_loss
+            
+            # Check for NaNs in final loss
+            if torch.isnan(shapelet_loss):
+                print("NaN detected in final shapelet loss")
+                print(f"  s2_loss: {s2_loss.item()}, s4_loss: {s4_loss.item()}")
+                print(f"  weights: s2={self.s2_weight}, s4={self.s4_weight}, combined={self.combined_weight}")
+                shapelet_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
             
             # Apply combined weight
             total_loss = self.combined_weight * shapelet_loss
             
+            # Final NaN check
+            if torch.isnan(total_loss):
+                print("NaN detected in weighted total loss")
+                total_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
+            
             return total_loss
         else:
             # Return zero loss if batch is empty (edge case)
+            print("Warning: No valid moments found in batch, returning zero loss")
             return torch.tensor(0.0, device=output.device, requires_grad=True)
 
 class MultiScaleLoss(nn.Module):
