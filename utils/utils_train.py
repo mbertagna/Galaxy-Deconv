@@ -398,9 +398,12 @@ class MultiScaleLoss(nn.Module):
             
             primary_loss = self.loss(output_i, target_i)
             
-            aux_loss = self.aux_loss_fn(output_i, target_i) if self.aux_loss_fn else 0
+            # add aux loss only at full scale
+            if not i: 
+                aux_loss = self.aux_loss_fn(output_i, target_i) if self.aux_loss_fn else 0
+                loss += self.aux_weight * aux_loss
             
-            loss += self.weights[i] * (primary_loss + self.aux_weight * aux_loss)
+            loss += self.weights[i] * primary_loss
         
         return loss
 
