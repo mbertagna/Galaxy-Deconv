@@ -24,7 +24,7 @@ def transform_tensor_batched(tensor):
     transformed_tensor.requires_grad_(True)
     return transformed_tensor
 
-def sigmoid_mask_batched(x: torch.Tensor, 
+def mask_batched(x: torch.Tensor, 
                         peak_pos: float = 0.5, 
                         sharpness: float = 0.1) -> torch.Tensor:
     return 1 / torch.exp(((x - peak_pos) / sharpness) ** 2)
@@ -103,7 +103,7 @@ def weighted_ellipse_fit_batched(points, weights):
     return params
 
 def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float = 0.1):
-    masked_image = sigmoid_mask_batched(image_tensor, peak_pos=peak_pos, sharpness=sharpness)
+    masked_image = mask_batched(image_tensor, peak_pos=peak_pos, sharpness=sharpness)
     points, weights = mask_to_points_and_weights_batched(masked_image)
     params = weighted_ellipse_fit_batched(points, weights)
     weighted_samsons_dist = weighted_samsons_distance_batched(points, params, weights)  # (B, H*W)
@@ -378,6 +378,9 @@ def normalize_images(batch):
     Returns:
         Normalized tensor with same shape but values scaled to [0, 1]
     """
+    if len(batch.shape) == 3:
+        batch = batch.unsqueeze(1)
+
     # Get min and max per image (keeping batch and channel dimensions)
     batch_size, channels, height, width = batch.shape
     reshaped = batch.view(batch_size, channels, -1)
@@ -411,16 +414,16 @@ def compute_moments(image_tensor):
     """
     image_tensor = normalize_images(image_tensor)
     
-    # Handle the channel dimension
+    # # Handle the channel dimension
     B, C, H, W = image_tensor.shape
     device = image_tensor.device
     
-    # If single-channel, squeeze the channel dimension for the calculations
-    if C == 1:
-        image_tensor = image_tensor.squeeze(1)
-    else:
-        # If multi-channel, convert to grayscale by averaging channels
-        image_tensor = image_tensor.mean(dim=1)
+    # # If single-channel, squeeze the channel dimension for the calculations
+    # if C == 1:
+    #     image_tensor = image_tensor.squeeze(1)
+    # else:
+    #     # If multi-channel, convert to grayscale by averaging channels
+    #     image_tensor = image_tensor.mean(dim=1)
     
     # Prepare coordinate grids
     y_coords, x_coords = torch.meshgrid(
