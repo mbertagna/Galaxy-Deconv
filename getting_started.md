@@ -1,5 +1,4 @@
 # Getting Started  
----
 
 Follow these steps to set up your environment and install dependencies for this project.  
 
