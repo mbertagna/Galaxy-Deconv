@@ -32,6 +32,8 @@ Once the virtual environment is active, install the required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+
+You can now run the project demo [final_report.ipynb](https://github.com/mbertagna/Galaxy-Deconv/blob/main/final_report.ipynb).
 ---
 
 
