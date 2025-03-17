@@ -199,4 +199,4 @@ if __name__ == "__main__":
     train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
           n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss,
           data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
-          model_save_path='./saved_models_ellipse_loss/', pretrained_epochs=opt.pretrained_epochs)
+          model_save_path='./saved_models_shape_loss/', pretrained_epochs=opt.pretrained_epochs)
