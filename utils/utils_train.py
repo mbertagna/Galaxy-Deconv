@@ -35,15 +35,12 @@ class BestEllipseLoss(nn.Module):
         """
         Compute symmetric loss between output and target ellipse parameters
         """
-        # Unpack parameters
         cx_out, cy_out, theta_out, a_out, b_out = output_params.unbind(-1)
         cx_tgt, cy_tgt, theta_tgt, a_tgt, b_tgt = target_params.unbind(-1)
         
-        # Center loss - using MSE
         center_coords_out = torch.stack([cx_out, cy_out], dim=-1)
         center_coords_tgt = torch.stack([cx_tgt, cy_tgt], dim=-1)
         
-        # Use maximum-based normalization for symmetric behavior
         out_max_axis = torch.max(torch.stack([a_out, b_out], dim=-1), dim=-1)[0]
         tgt_max_axis = torch.max(torch.stack([a_tgt, b_tgt], dim=-1), dim=-1)[0]
         coord_scale = torch.maximum(out_max_axis, tgt_max_axis).unsqueeze(-1) + 1e-8
@@ -52,135 +49,64 @@ class BestEllipseLoss(nn.Module):
             center_coords_out / coord_scale.unsqueeze(-1),
             center_coords_tgt / coord_scale.unsqueeze(-1),
             reduction='none'
-        ).mean(dim=-1)  # Mean across coordinates but keep batch dimension
+        ).mean(dim=-1) 
         
-        # Angle loss using cosine similarity
         angle_vec_out = torch.stack([torch.cos(theta_out), torch.sin(theta_out)], dim=-1)
         angle_vec_tgt = torch.stack([torch.cos(theta_tgt), torch.sin(theta_tgt)], dim=-1)
         
-        # Compute cosine similarity (dot product of normalized vectors)
         cosine_sim = torch.sum(angle_vec_out * angle_vec_tgt, dim=-1)
-        # Convert to loss (1 - cos_sim ranges from 0 to 2)
         normalized_angle_loss = 1 - cosine_sim
         
-        # Axis loss with symmetric normalization
         axis_scale = torch.maximum(out_max_axis, tgt_max_axis).unsqueeze(-1) + 1e-8
         normalized_a_loss = ((a_out / axis_scale) - (a_tgt / axis_scale))**2
         normalized_b_loss = ((b_out / axis_scale) - (b_tgt / axis_scale))**2
         normalized_axis_loss = 0.5 * (normalized_a_loss + normalized_b_loss)
         
-        # Combine losses (keeping batch dimension)
         total_loss = (
             self.center_weight * normalized_center_loss +
             self.angle_weight * normalized_angle_loss +
             self.axis_weight * normalized_axis_loss
         )
         
-        return total_loss  # Shape: [batch_size]
+        return total_loss 
     
     def forward(self, output, target):
         batch_size = output.shape[0]
         device = output.device
         
-        # Transform tensors
         output_transformed = transform_tensor_batched(output)
         target_transformed = transform_tensor_batched(target)
         
-        # Arrays to store ellipse parameters and fit metrics for each level
         gt_params_all_levels = []
         gt_fit_metrics = torch.zeros((batch_size, self.num_ellipses), device=device)
         
-        # Step 1: Compute ellipse parameters and fit metrics for each peak position on the ground truth
         for i, pp in enumerate(self.ellipse_levels):
-            # Extract ground truth ellipse parameters at current peak position level
             gt_params, _ = safe_ellipse_params_batched(target_transformed, peak_pos=pp)
             gt_params_all_levels.append(gt_params)
             
-            # Compute how well this ellipse fits the ground truth image
             fit_metric = ellipse_fit_metric(target_transformed, gt_params)
             gt_fit_metrics[:, i] = fit_metric
         
-        # Step 2: Find the best ellipse for each image in the batch
-        best_ellipse_indices = torch.argmax(gt_fit_metrics, dim=1)  # Shape: [batch_size]
+        best_ellipse_indices = torch.argmax(gt_fit_metrics, dim=1)
         
-        # Step 3: Get the corresponding parameters for the best ellipses
         best_gt_params = torch.zeros((batch_size, 5), device=device)
         
         for b in range(batch_size):
             best_idx = best_ellipse_indices[b].item()
             best_gt_params[b] = gt_params_all_levels[best_idx][b]
         
-        # Step 4: Compute output ellipse parameters using the same peak positions as the best ground truth ellipses
         output_params = torch.zeros((batch_size, 5), device=device)
         
         for b in range(batch_size):
             best_idx = best_ellipse_indices[b].item()
             pp = self.ellipse_levels[best_idx]
-            # Extract a single image from the batch
             single_output = output_transformed[b:b+1]
-            # Compute ellipse params for this single image with the best peak position
             params, _ = safe_ellipse_params_batched(single_output, peak_pos=pp)
             output_params[b] = params[0]  # Extract from batch dimension
         
-        # Step 5: Compute loss between output and ground truth using the best ellipse parameters
         losses = self.ellipse_loss_symmetric(output_params, best_gt_params)
         
-        # Return the mean loss across the batch
         return losses.mean()
-    
-# class MomentBasedLoss(nn.Module):
-#     def __init__(self, central_moments_weight=1.0, centroid_weight=1.0):
-#         super(MomentBasedLoss, self).__init__()
-#         self.central_moments_weight = central_moments_weight
-#         self.centroid_weight = centroid_weight
-    
-#     def forward(self, output, target):
-#         # Use the external compute_moments function to get moments
-#         output_batch_moments = compute_moments(output)
-#         target_batch_moments = compute_moments(target)
-        
-#         # Extract device for tensor creation
-#         device = output.device
-#         B = len(output_batch_moments)
-        
-#         # Prepare tensors for comparison
-#         output_centroids = torch.zeros((B, 2), device=device)
-#         target_centroids = torch.zeros((B, 2), device=device)
-#         output_central_moments = torch.zeros((B, 3), device=device)
-#         target_central_moments = torch.zeros((B, 3), device=device)
-        
-#         # Convert moment dictionaries to tensors
-#         for i in range(B):
-#             output_moments = output_batch_moments[i]
-#             target_moments = target_batch_moments[i]
-            
-#             # Store centroids [cy, cx]
-#             output_centroids[i, 0] = output_moments['cy']
-#             output_centroids[i, 1] = output_moments['cx']
-#             target_centroids[i, 0] = target_moments['cy']
-#             target_centroids[i, 1] = target_moments['cx']
-            
-#             # Store central moments [mu20, mu11, mu02]
-#             output_central_moments[i, 0] = output_moments['mu20']
-#             output_central_moments[i, 1] = output_moments['mu11']
-#             output_central_moments[i, 2] = output_moments['mu02']
-#             target_central_moments[i, 0] = target_moments['mu20']
-#             target_central_moments[i, 1] = target_moments['mu11']
-#             target_central_moments[i, 2] = target_moments['mu02']
-        
-#         # Centroid loss (direct comparison)
-#         centroid_loss = F.mse_loss(output_centroids, target_centroids)
-        
-#         # Central moments loss
-#         central_moments_loss = F.mse_loss(output_central_moments, target_central_moments)
-        
-#         # Total loss
-#         total_loss = (
-#             self.centroid_weight * centroid_loss + 
-#             self.central_moments_weight * central_moments_loss
-#         )
-        
-#         return total_loss
 
 class MomentBasedLoss(nn.Module):
     def __init__(self, central_moments_weight=1.0, centroid_weight=1.0, third_order_weight=1.0):
@@ -190,15 +116,12 @@ class MomentBasedLoss(nn.Module):
         self.third_order_weight = third_order_weight
     
     def forward(self, output, target):
-        # Use the external compute_moments function to get moments
         output_batch_moments = compute_moments(output)
         target_batch_moments = compute_moments(target)
         
-        # Extract device for tensor creation
         device = output.device
         B = len(output_batch_moments)
         
-        # Prepare tensors for comparison
         output_centroids = torch.zeros((B, 2), device=device)
         target_centroids = torch.zeros((B, 2), device=device)
         output_central_moments = torch.zeros((B, 3), device=device)
@@ -206,18 +129,15 @@ class MomentBasedLoss(nn.Module):
         output_third_order = torch.zeros((B, 4), device=device)
         target_third_order = torch.zeros((B, 4), device=device)
         
-        # Convert moment dictionaries to tensors
         for i in range(B):
             output_moments = output_batch_moments[i]
             target_moments = target_batch_moments[i]
             
-            # Store centroids [cy, cx]
             output_centroids[i, 0] = output_moments['cy']
             output_centroids[i, 1] = output_moments['cx']
             target_centroids[i, 0] = target_moments['cy']
             target_centroids[i, 1] = target_moments['cx']
             
-            # Store second-order central moments [mu20, mu11, mu02]
             output_central_moments[i, 0] = output_moments['mu20']
             output_central_moments[i, 1] = output_moments['mu11']
             output_central_moments[i, 2] = output_moments['mu02']
@@ -225,7 +145,6 @@ class MomentBasedLoss(nn.Module):
             target_central_moments[i, 1] = target_moments['mu11']
             target_central_moments[i, 2] = target_moments['mu02']
             
-            # Store third-order central moments [mu30, mu21, mu12, mu03]
             output_third_order[i, 0] = output_moments['mu30']
             output_third_order[i, 1] = output_moments['mu21']
             output_third_order[i, 2] = output_moments['mu12']
@@ -235,16 +154,12 @@ class MomentBasedLoss(nn.Module):
             target_third_order[i, 2] = target_moments['mu12']
             target_third_order[i, 3] = target_moments['mu03']
         
-        # Centroid loss (direct comparison)
         centroid_loss = F.mse_loss(output_centroids, target_centroids)
         
-        # Second-order central moments loss
         central_moments_loss = F.mse_loss(output_central_moments, target_central_moments)
         
-        # Third-order central moments loss
         third_order_loss = F.mse_loss(output_third_order, target_third_order)
         
-        # Total loss
         total_loss = (
             self.centroid_weight * centroid_loss + 
             self.central_moments_weight * central_moments_loss +
@@ -279,7 +194,6 @@ class ShapeletMomentsLoss(nn.Module):
         Returns:
             total_loss: The weighted shapelet moments loss
         """
-        # Check for NaNs in input tensors
         if torch.isnan(output).any():
             print("NaN detected in output tensor in ShapeletMomentsLoss")
             for b in range(output.shape[0]):
@@ -292,13 +206,11 @@ class ShapeletMomentsLoss(nn.Module):
                 if torch.isnan(target[b]).any():
                     print(f"  NaN found in target batch element {b}")
         
-        # Use the compute_shapelet_moments function to get moments
         output_batch_moments = compute_shapelet_moments(output)
         target_batch_moments = compute_shapelet_moments(target)
         
         B = len(output_batch_moments)
         
-        # Instead of creating new tensors, directly use the values from the moments
         s2_losses = []
         s4_losses = []
         
@@ -306,7 +218,6 @@ class ShapeletMomentsLoss(nn.Module):
             output_moments = output_batch_moments[i]
             target_moments = target_batch_moments[i]
             
-            # Check if moments exist
             if 'S2' not in output_moments or 'S2' not in target_moments:
                 print(f"Missing S2 moment for batch element {i}")
                 continue
@@ -315,12 +226,9 @@ class ShapeletMomentsLoss(nn.Module):
                 print(f"Missing S4 moment for batch element {i}")
                 continue
             
-            # Compute individual losses directly from the moment values
-            # This maintains gradient flow
             s2_loss_i = (output_moments['S2'] - target_moments['S2']) ** 2
             s4_loss_i = (output_moments['S4'] - target_moments['S4']) ** 2
             
-            # Check for NaNs in individual losses
             if torch.isnan(s2_loss_i):
                 print(f"NaN detected in S2 loss for batch element {i}")
                 print(f"  output S2: {output_moments['S2'].item() if not torch.isnan(output_moments['S2']) else 'NaN'}")
@@ -336,12 +244,10 @@ class ShapeletMomentsLoss(nn.Module):
             s2_losses.append(s2_loss_i)
             s4_losses.append(s4_loss_i)
         
-        # Stack losses and take mean
         if s2_losses:
             s2_loss = torch.stack(s2_losses).mean()
             s4_loss = torch.stack(s4_losses).mean()
             
-            # Check for NaNs in aggregated losses
             if torch.isnan(s2_loss):
                 print("NaN detected in aggregated S2 loss")
                 s2_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
@@ -350,27 +256,22 @@ class ShapeletMomentsLoss(nn.Module):
                 print("NaN detected in aggregated S4 loss")
                 s4_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
             
-            # Total shapelet moments loss with weighting
             shapelet_loss = self.s2_weight * s2_loss + self.s4_weight * s4_loss
             
-            # Check for NaNs in final loss
             if torch.isnan(shapelet_loss):
                 print("NaN detected in final shapelet loss")
                 print(f"  s2_loss: {s2_loss.item()}, s4_loss: {s4_loss.item()}")
                 print(f"  weights: s2={self.s2_weight}, s4={self.s4_weight}, combined={self.combined_weight}")
                 shapelet_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
             
-            # Apply combined weight
             total_loss = self.combined_weight * shapelet_loss
             
-            # Final NaN check
             if torch.isnan(total_loss):
                 print("NaN detected in weighted total loss")
                 total_loss = torch.tensor(0.0, device=output.device, requires_grad=True)
             
             return total_loss
         else:
-            # Return zero loss if batch is empty (edge case)
             print("Warning: No valid moments found in batch, returning zero loss")
             return torch.tensor(0.0, device=output.device, requires_grad=True)
 
@@ -390,7 +291,6 @@ class MultiScaleLoss(nn.Module):
 
         self.weights = torch.FloatTensor([1 / (2 ** scale) for scale in range(self.scales)])
         self.multiscales = [nn.AvgPool2d(2 ** scale, 2 ** scale) for scale in range(self.scales)]
-
     def forward(self, output, target):
         loss = 0
         for i in range(self.scales):

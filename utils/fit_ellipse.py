@@ -4,18 +4,15 @@ import numpy as np
 import math
 
 def transform_tensor_batched(tensor):
-    if tensor.dim() == 3:  # (B, H, W)
+    if tensor.dim() == 3: 
         transformed_tensor = tensor.clone()
-    elif tensor.dim() == 4:  # (B, C, H, W)
-        # Use RGB weights for grayscale conversion
+    elif tensor.dim() == 4: 
         rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=tensor.device)
         transformed_tensor = torch.einsum('bchw,c->bhw', tensor, rgb_weights)
     
-    # Normalize if needed
     if transformed_tensor.max() > 1.0:
         transformed_tensor = transformed_tensor / 255.0
 
-    # Min-max normalization per batch
     min_val = transformed_tensor.view(transformed_tensor.shape[0], -1).min(dim=1, keepdim=True)[0].unsqueeze(-1)
     max_val = transformed_tensor.view(transformed_tensor.shape[0], -1).max(dim=1, keepdim=True)[0].unsqueeze(-1)
     valid_range = (max_val > min_val).float()
@@ -34,24 +31,19 @@ def mask_to_points_and_weights_batched(mask):
     y_coords, x_coords = torch.meshgrid(torch.arange(H, device=mask.device), 
                                       torch.arange(W, device=mask.device))
     
-    # Create points grid (H, W, 2)
     points_grid = torch.stack((y_coords, x_coords), dim=-1).float()
     
-    # Expand points for batch dimension (B, H, W, 2)
     points = points_grid.unsqueeze(0).expand(B, H, W, 2)
     
-    # Reshape to (B, H*W, 2)
     points = points.reshape(B, H*W, 2)
     
-    # Reshape weights to (B, H*W)
     weights = mask.reshape(B, H*W)
     
     return points, weights
 
 def weighted_samsons_distance_batched(points, coeffs, weights):
-    y, x = points[..., 0], points[..., 1]  # Using your coordinate convention
+    y, x = points[..., 0], points[..., 1] 
     
-    # Extract coefficients for each batch (B, 6) -> (B, 1) for broadcasting
     A = coeffs[:, 0:1]
     B = coeffs[:, 1:2]
     C = coeffs[:, 2:3]
@@ -59,19 +51,14 @@ def weighted_samsons_distance_batched(points, coeffs, weights):
     E = coeffs[:, 4:5]
     F = coeffs[:, 5:6]
 
-    # Compute the algebraic distance for each point in each batch
     algebraic_dist = A * x**2 + B * x * y + C * y**2 + D * x + E * y + F  # (B, N)
 
-    # Compute the gradient magnitude normalization term
-    # Using the correct gradient computation
     grad_x = 2*A*x + B*y + D  # (B, N)
     grad_y = B*x + 2*C*y + E  # (B, N)
     grad_magnitude = torch.sqrt(grad_x**2 + grad_y**2)  # (B, N)
 
-    # Compute Samson's distance
     samsons_dist = torch.abs(algebraic_dist) / (grad_magnitude + 1e-8)  # (B, N)
     
-    # Apply weights
     weighted_samsons_dist = samsons_dist * weights  # (B, N)
 
     return weighted_samsons_dist
@@ -79,24 +66,17 @@ def weighted_samsons_distance_batched(points, coeffs, weights):
 def weighted_ellipse_fit_batched(points, weights):
     B, N, _ = points.shape
     
-    # Extract x and y coordinates
-    x = points[..., 0]  # (B, N)
-    y = points[..., 1]  # (B, N)
+    x = points[..., 0]
+    y = points[..., 1]
     
-    # Construct the design matrix (B, N, 6)
     D = torch.stack((x**2, x*y, y**2, x, y, torch.ones_like(x)), dim=-1)
     
-    # Apply weights to design matrix
-    D_weighted = D * weights.unsqueeze(-1)  # (B, N, 6)
+    D_weighted = D * weights.unsqueeze(-1)
     
-    # Solve using SVD for each batch
-    # We can use torch.svd on the whole batch at once
     U, S, V = torch.svd(D_weighted)
     
-    # Get the last column of V for each batch
-    params = V[..., -1]  # (B, 6)
+    params = V[..., -1]
     
-    # Normalize parameters
     norm = torch.norm(params, dim=-1, keepdim=True)
     params = params / (norm + 1e-8)
     
@@ -108,16 +88,13 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     params = weighted_ellipse_fit_batched(points, weights)
     weighted_samsons_dist = weighted_samsons_distance_batched(points, params, weights)  # (B, H*W)
     
-    # Extract parameters
     A, B, C, D, E, F = params.unbind(-1)
     
-    # Calculate ellipse parameters
     denominator = 4*A*C - B**2
     cx = (B*E - 2*C*D) / (denominator + 1e-8)
     cy = (B*D - 2*A*E) / (denominator + 1e-8)
     theta = 0.5 * torch.atan2(B, A - C)
     
-    # Calculate semi-axes lengths
     cos_t = torch.cos(theta)
     sin_t = torch.sin(theta)
     expr1 = A*cx**2 + C*cy**2 + B*cx*cy + D*cx + E*cy + F
@@ -127,13 +104,10 @@ def ellipse_params_batched(image_tensor, peak_pos: float = 0.5, sharpness: float
     a = torch.sqrt(torch.abs(a_squared))
     b = torch.sqrt(torch.abs(b_squared))
 
-    # Reshape a for proper broadcasting: (B,) -> (B, 1)
-    a_expanded = a.unsqueeze(1)  # Now shape is (B, 1)
+    a_expanded = a.unsqueeze(1)
     
-    # Normalize by semi-major axis
     normalized_dist = weighted_samsons_dist / (a_expanded + 1e-8)
     
-    # Calculate weighted mean
     total_weighted_dist = torch.sum(normalized_dist * weights, dim=1)
     total_weight = torch.sum(weights, dim=1)
     mean_normalized_samsons_dist = total_weighted_dist / (total_weight + 1e-8)
@@ -144,36 +118,30 @@ def safe_ellipse_params_batched(image_tensor, peak_pos=0.5, sharpness=0.1):
     B = image_tensor.shape[0]
     device = image_tensor.device
     
-    # Initialize output tensors
     all_params = torch.zeros((B, 5), device=device)
     all_confidence = torch.zeros(B, device=device)
     
-    # Process each batch element individually
     for i in range(B):
         try:
-            # Process single image
-            single_image = image_tensor[i:i+1]  # Keep batch dimension
+            single_image = image_tensor[i:i+1]
             params, confidence = ellipse_params_batched(single_image, peak_pos, sharpness)
             
-            # Check for NaN or Inf values
             if (torch.isnan(params).any() or torch.isinf(params).any() or 
                 torch.isnan(confidence).any() or torch.isinf(confidence).any()):
                 raise ValueError("NaN or Inf values detected in output")
                 
-            all_params[i] = params[0]  # First (only) element of batch
+            all_params[i] = params[0]
             all_confidence[i] = confidence[0]
             
         except Exception as e:
-            # Log the error for debugging
             print(f"Error in ellipse fitting for batch element {i}: {str(e)}")
             
-            # Default values (detached from computation graph)
             default_params = torch.tensor([
-                image_tensor.shape[2] / 2,  # cx = width/2
-                image_tensor.shape[1] / 2,  # cy = height/2
-                0.0,                        # theta = 0
-                10.0,                       # a = 10
-                10.0                        # b = 10
+                image_tensor.shape[2] / 2,
+                image_tensor.shape[1] / 2, 
+                0.0,
+                10.0,
+                10.0
             ], device=device).detach()
             
             all_params[i] = default_params
@@ -182,7 +150,6 @@ def safe_ellipse_params_batched(image_tensor, peak_pos=0.5, sharpness=0.1):
     return all_params, all_confidence
 
 def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
-    # Convert images to numpy and ensure they're grayscale
     if images.dim() == 4:  # (B, C, H, W)
         images = images.mean(dim=1)
     images_np = images.detach().cpu().numpy()
@@ -200,49 +167,41 @@ def plot_batch_with_ellipses(images, ellipses_params, num_cols=2, figsize=None):
         row, col = img_idx // num_cols, img_idx % num_cols
         ax = axes[row, col]
         
-        # Plot the image with fixed extent for 40x40 units
         ax.imshow(images_np[img_idx], cmap='gray', extent=[0, 40, 40, 0])
 
-        # Set fixed limits for 40x40 view
         ax.set_xlim(0, 40)
-        ax.set_ylim(40, 0)  # Inverted y-axis to match image coordinates
+        ax.set_ylim(40, 0) 
         
         color_codes = ['r', 'g', 'b', 'c', 'm', 'y']
         
-        # Loop over different ellipse parameters (from different peak positions)
         for param_idx, ellipse_params in enumerate(ellipses_params):
             params_np = ellipse_params.detach().cpu().numpy()
             cx, cy, theta, a, b = params_np[img_idx]
             
-            # Scale the coordinates to match the 40x40 view
             height, width = images_np[img_idx].shape
             scale_x = 40 / width
             scale_y = 40 / height
             
-            cx = cx * scale_y  # Scale center x (note: x uses scale_y because of image coordinate system)
-            cy = cy * scale_x  # Scale center y (note: y uses scale_x because of image coordinate system)
-            a = a * scale_y    # Scale semi-major axis
-            b = b * scale_x    # Scale semi-minor axis
+            cx = cx * scale_y  
+            cy = cy * scale_x  
+            a = a * scale_y    
+            b = b * scale_x    
             
-            # Generate ellipse points
             x = a * np.cos(t)
             y = b * np.sin(t)
             
-            # Rotate and translate the ellipse
             R = np.array([[np.cos(theta), -np.sin(theta)],
                         [np.sin(theta), np.cos(theta)]])
             points = np.dot(np.stack([x, y], axis=1), R.T)
             points[:, 0] += cx
             points[:, 1] += cy
             
-            # Plot the ellipse
             ax.plot(points[:, 1], points[:, 0], color_codes[param_idx%len(color_codes)]+'-', linewidth=2)
             ax.plot(cy, cx, color_codes[param_idx%len(color_codes)]+'+', markersize=10)
         
         ax.set_title(f'Image {img_idx}')
-        ax.grid(True)  # Add grid for better visibility of units
+        ax.grid(True) 
         
-    # Hide empty subplots
     for idx in range(batch_size, num_rows * num_cols):
         row, col = idx // num_cols, idx % num_cols
         axes[row, col].axis('off')
@@ -271,7 +230,6 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
         A tensor of shape (B,) with values between 0 and 1 representing 
         the normalized fit metric for each image
     """
-    # Convert to grayscale if needed (B, H, W)
     if image_tensor.dim() == 4:
         rgb_weights = torch.tensor([0.299, 0.587, 0.114], device=image_tensor.device)
         image = torch.einsum('bchw,c->bhw', image_tensor, rgb_weights)
@@ -281,14 +239,12 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     B, H, W = image.shape
     device, dtype = image.device, image.dtype
         
-    # Extract ellipse parameters with broadcasting shapes
     cy = ellipse_params[:, 0].view(B, 1, 1)
     cx = ellipse_params[:, 1].view(B, 1, 1)
     theta = ellipse_params[:, 2].view(B, 1, 1)
     a = ellipse_params[:, 3].view(B, 1, 1)
     b = ellipse_params[:, 4].view(B, 1, 1)
         
-    # Create coordinate grids
     y_indices, x_indices = torch.meshgrid(
         torch.arange(H, device=device, dtype=dtype),
         torch.arange(W, device=device, dtype=dtype),
@@ -297,74 +253,51 @@ def ellipse_fit_metric(image_tensor, ellipse_params):
     y_indices = y_indices.unsqueeze(0).expand(B, -1, -1)
     x_indices = x_indices.unsqueeze(0).expand(B, -1, -1)
     
-    # Create valid image mask (all pixels within the image boundary)
-    # This is always True for all pixels, but we define it explicitly for clarity
     valid_mask = torch.ones_like(y_indices, dtype=torch.bool)
         
-    # Translate coordinates to ellipse center
     x_trans = x_indices - cx
     y_trans = y_indices - cy
         
-    # Rotate coordinates
     cos_theta = torch.cos(theta)
     sin_theta = torch.sin(theta)
     x_rot = x_trans * cos_theta + y_trans * sin_theta
     y_rot = -x_trans * sin_theta + y_trans * cos_theta
         
-    # Compute ellipse equation value for each pixel
     ellipse_eq = (x_rot / a)**2 + (y_rot / b)**2
         
-    # Create binary mask for whole pixels (no partial pixels)
-    # Only count pixels that are within both the ellipse and the image boundary
     inside_mask = (ellipse_eq <= 1.0).float() * valid_mask.float()
     
-    # Outside mask is only valid pixels that are not inside the ellipse
     outside_mask = valid_mask.float() - inside_mask
     
-    # Calculate distance from center for weighting (normalized by ellipse size)
     distance = torch.sqrt(((x_indices - cx) / a)**2 + ((y_indices - cy) / b)**2)
     
-    # Create distance weight (closer to center = higher weight)
-    # Using a simple linear weight: 1 at center, 0.5 at ellipse edge
     distance_weight = torch.clamp(1.0 - distance * 0.5, min=0.5, max=1.0)
     
-    # Apply distance weighting to inside pixels only
     weighted_inside = image * inside_mask * distance_weight
     weighted_inside_sum = torch.sum(weighted_inside, dim=(1, 2))
     
-    # Count whole pixels (only within valid image area)
     inside_count = torch.sum(inside_mask, dim=(1, 2))
     outside_count = torch.sum(outside_mask, dim=(1, 2))
     
-    # Calculate outside intensity (unweighted)
     outside_intensity = torch.sum(image * outside_mask, dim=(1, 2))
     
-    eps = 1e-8  # Avoid division by zero
+    eps = 1e-8 
     
-    # Handle cases where ellipse is completely outside the image
-    # or where there are no outside pixels
     zero_inside = inside_count < eps
     zero_outside = outside_count < eps
     
-    # Compute weighted density ratio
     inside_density = weighted_inside_sum / (inside_count + eps)
     outside_density = outside_intensity / (outside_count + eps)
     
-    # If there are no outside pixels, set contrast_ratio to a high value
-    # If there are no inside pixels, set contrast_ratio to 0
     contrast_ratio = torch.zeros_like(inside_density)
     
-    # Normal case: both inside and outside pixels exist
     normal_case = (~zero_inside & ~zero_outside)
     contrast_ratio[normal_case] = inside_density[normal_case] / (outside_density[normal_case] + eps)
     
-    # Edge case: no outside pixels (ellipse covers entire image)
-    contrast_ratio[~zero_inside & zero_outside] = 10.0  # arbitrary high value
+    contrast_ratio[~zero_inside & zero_outside] = 10.0 
     
-    # Edge case: no inside pixels (ellipse completely outside image)
     contrast_ratio[zero_inside] = 0.0
     
-    # Normalize to [0, 1]
     normalized_score = contrast_ratio / (1.0 + contrast_ratio)
     return normalized_score
 
@@ -381,23 +314,17 @@ def normalize_images(batch):
     if len(batch.shape) == 3:
         batch = batch.unsqueeze(1)
 
-    # Get min and max per image (keeping batch and channel dimensions)
     batch_size, channels, height, width = batch.shape
     reshaped = batch.view(batch_size, channels, -1)
     
-    # Find min and max for each image
     min_vals = reshaped.min(dim=2, keepdim=True)[0]
     max_vals = reshaped.max(dim=2, keepdim=True)[0]
     
-    # Reshape min and max back to original dimensions for broadcasting
-    min_vals = min_vals.unsqueeze(-1)  # Add width dimension
-    max_vals = max_vals.unsqueeze(-1)  # Add width dimension
+    min_vals = min_vals.unsqueeze(-1) 
+    max_vals = max_vals.unsqueeze(-1)  
     
-    # Handle case where min == max (constant image)
-    # Avoid division by zero by creating a new tensor instead of modifying in place
     divisor = torch.maximum(max_vals - min_vals, torch.ones_like(max_vals) * 1e-8)
     
-    # Scale to [0, 1]
     normalized = (batch - min_vals) / divisor
     
     return normalized
@@ -414,67 +341,47 @@ def compute_moments(image_tensor):
     """
     image_tensor = normalize_images(image_tensor)
     
-    # # Handle the channel dimension
     B, C, H, W = image_tensor.shape
     device = image_tensor.device
     
-    # # If single-channel, squeeze the channel dimension for the calculations
-    # if C == 1:
-    #     image_tensor = image_tensor.squeeze(1)
-    # else:
-    #     # If multi-channel, convert to grayscale by averaging channels
-    #     image_tensor = image_tensor.mean(dim=1)
-    
-    # Prepare coordinate grids
     y_coords, x_coords = torch.meshgrid(
         torch.arange(H, device=device, dtype=torch.float32),
         torch.arange(W, device=device, dtype=torch.float32),
         indexing='ij'
     )
     
-    # List to store moments for each image
     batch_moments = []
     
     for i in range(B):
         img = image_tensor[i]
         
-        # Zero-order moment (total intensity)
         m00 = torch.sum(img) + 1e-8
             
-        # First-order moments (for centroid)
         m10 = torch.sum(img * x_coords)
         m01 = torch.sum(img * y_coords)
         
-        # Centroid
         cx = m10 / m00
         cy = m01 / m00
         
-        # Central moments up to order 2
         mu20 = torch.sum(img * (x_coords - cx)**2) / m00
         mu11 = torch.sum(img * (x_coords - cx) * (y_coords - cy)) / m00
         mu02 = torch.sum(img * (y_coords - cy)**2) / m00
         
-        # Central moments of order 3
         mu30 = torch.sum(img * (x_coords - cx)**3) / m00
         mu21 = torch.sum(img * (x_coords - cx)**2 * (y_coords - cy)) / m00
         mu12 = torch.sum(img * (x_coords - cx) * (y_coords - cy)**2) / m00
         mu03 = torch.sum(img * (y_coords - cy)**3) / m00
         
-        # Store moments in a dictionary
         moments = {
-            # Zero-order moment
             'm00': m00,
             
-            # Centroid
             'cx': cx,
             'cy': cy,
             
-            # Second-order central moments
             'mu20': mu20,
             'mu11': mu11,
             'mu02': mu02,
             
-            # Third-order central moments
             'mu30': mu30,
             'mu21': mu21,
             'mu12': mu12,
@@ -495,30 +402,25 @@ def ellipse_params_from_moments(image_tensor):
     Returns:
         ellipse_params: Tensor of shape [B, 5] containing [cy, cx, theta, a, b] for each image
     """
-    # Get the moments for each image in the batch
     batch_moments = compute_moments(image_tensor)
     
     B = len(batch_moments)
     device = image_tensor.device
     
-    # Preallocate output tensor
     ellipse_params = torch.zeros((B, 5), device=device)
     
     for i in range(B):
         moments = batch_moments[i]
         
-        # Extract moments
         cy = moments['cy']
         cx = moments['cx']
         mu20 = moments['mu20']
         mu11 = moments['mu11']
         mu02 = moments['mu02']
         
-        # Calculate orientation angle
         delta = mu20 - mu02
         theta = 0.5 * torch.atan2(2 * mu11, delta + 1e-8)
         
-        # Calculate eigenvalues directly
         trace = mu20 + mu02
         det = mu20 * mu02 - mu11 * mu11
         disc = torch.sqrt(trace * trace - 4 * det + 1e-8)
@@ -526,15 +428,12 @@ def ellipse_params_from_moments(image_tensor):
         lambda1 = 0.5 * (trace + disc)
         lambda2 = 0.5 * (trace - disc)
         
-        # Ensure eigenvalues are positive without in-place operations
         lambda1 = torch.maximum(lambda1, torch.tensor(1e-6, device=device))
         lambda2 = torch.maximum(lambda2, torch.tensor(1e-6, device=device))
         
-        # Calculate semi-axes
         a = torch.sqrt(lambda1)
         b = torch.sqrt(lambda2)
         
-        # Store parameters
         ellipse_params[i] = torch.tensor([cy, cx, theta, a, b], device=device)
     
     return ellipse_params
@@ -561,14 +460,12 @@ def laguerre_shapelet(n, x):
     if not x.requires_grad:
         x = x.clone().detach().requires_grad_(True)
     
-    # Check for NaNs in input
     if torch.isnan(x).any():
         print(f"NaN detected in input to laguerre_shapelet for n={n}")
         return torch.zeros_like(x)
         
     L_n = laguerre_torch(n, x)
     
-    # Check for NaNs after Laguerre polynomial
     if torch.isnan(L_n).any():
         print(f"NaN detected in Laguerre polynomial L_{n} output")
         return torch.zeros_like(x)
@@ -576,7 +473,6 @@ def laguerre_shapelet(n, x):
     factorial_n = math.factorial(n)
     result = (1 / math.sqrt(factorial_n)) * torch.exp(-x / 2) * L_n
     
-    # Check for NaNs in result
     if torch.isnan(result).any():
         print(f"NaN detected in laguerre_shapelet final result for n={n}")
         print(f"Factor: {1 / math.sqrt(factorial_n)}")
@@ -596,55 +492,43 @@ def compute_shapelet_moments(image_tensor, max_order=4):
     Returns:
         shapelet_moments_dict: Dictionary containing shapelet moment values for each image
     """
-    # Check for NaNs in input
     if torch.isnan(image_tensor).any():
         print("NaN detected in input to compute_shapelet_moments")
-        # Find which batch elements contain NaNs
         for b in range(image_tensor.shape[0]):
             if torch.isnan(image_tensor[b]).any():
                 print(f"  NaN found in batch element {b}")
     
     image_tensor = normalize_images(image_tensor)
     
-    # Check for NaNs after normalization
     if torch.isnan(image_tensor).any():
         print("NaN detected after normalize_images in compute_shapelet_moments")
     
-    # Handle the channel dimension
     B, C, H, W = image_tensor.shape
     device = image_tensor.device
     
-    # If single-channel, squeeze the channel dimension
     if C == 1:
         image_tensor = image_tensor.squeeze(1)
     else:
-        # If multi-channel, convert to grayscale by averaging channels
         image_tensor = image_tensor.mean(dim=1)
     
-    # Check for NaNs after channel handling
     if torch.isnan(image_tensor).any():
         print("NaN detected after channel handling in compute_shapelet_moments")
     
-    # Prepare coordinate grids
     y_coords, x_coords = torch.meshgrid(
         torch.arange(H, device=device, dtype=torch.float32),
         torch.arange(W, device=device, dtype=torch.float32),
         indexing='ij'
     )
     
-    # Center and scale coordinates
-    # First compute image centroids
     batch_centroids = []
     for i in range(B):
         img = image_tensor[i]
         
-        # Check for NaNs in current image
         if torch.isnan(img).any():
             print(f"NaN detected in image {i} before centroid calculation")
             
         m00 = torch.sum(img) + 1e-8
         
-        # Check for small or NaN m00
         if m00 < 1e-6 or torch.isnan(m00):
             print(f"Warning: Very small or NaN m00 ({m00.item()}) for image {i}")
             
@@ -654,88 +538,70 @@ def compute_shapelet_moments(image_tensor, max_order=4):
         cx = m10 / m00
         cy = m01 / m00
         
-        # Check for NaN centroids
         if torch.isnan(cx) or torch.isnan(cy):
             print(f"NaN detected in centroids for image {i}: cx={cx.item()}, cy={cy.item()}")
             print(f"  m00={m00.item()}, m10={m10.item()}, m01={m01.item()}")
-            # Use fallback values to avoid propagating NaNs
             cx = H / 2
             cy = W / 2
         
-        # Compute radius for scaling
         mu20 = torch.sum(img * (x_coords - cx)**2) / m00
         mu02 = torch.sum(img * (y_coords - cy)**2) / m00
         
-        # Check for NaN moments
         if torch.isnan(mu20) or torch.isnan(mu02):
             print(f"NaN detected in moments for image {i}: mu20={mu20.item()}, mu02={mu02.item()}")
-            # Use fallback values
             mu20 = torch.tensor(1.0, device=device)
             mu02 = torch.tensor(1.0, device=device)
             
-        radius = 2 * torch.sqrt(mu20 + mu02)  # Use 2x standard deviation as radius
+        radius = 2 * torch.sqrt(mu20 + mu02)
         
-        # Check for small or NaN radius
         if radius < 1e-6 or torch.isnan(radius):
             print(f"Warning: Very small or NaN radius ({radius.item()}) for image {i}")
-            radius = torch.tensor(1.0, device=device)  # Use fallback value
+            radius = torch.tensor(1.0, device=device)
             
         batch_centroids.append((cx, cy, radius))
     
-    # List to store shapelet moments for each image
     batch_shapelet_moments = []
     
     for i in range(B):
         img = image_tensor[i]
         cx, cy, radius = batch_centroids[i]
         
-        # Dictionary to store shapelet moments
         moments = {}
         
-        # Compute normalized radial distance for each pixel
-        # Scale by radius to normalize object size
         r_squared = ((x_coords - cx)**2 + (y_coords - cy)**2) / (radius**2 + 1e-8)
         
-        # Check for NaNs in r_squared
         if torch.isnan(r_squared).any():
             print(f"NaN detected in r_squared for image {i}")
             print(f"  cx={cx.item()}, cy={cy.item()}, radius={radius.item()}")
-            continue  # Skip this image
+            continue
             
-        r_squared.requires_grad_(True)  # Enable gradient tracking
+        r_squared.requires_grad_(True)
         
-        # Compute shapelet moments up to max_order
         for n in range(max_order + 1):
-            # Second order shapelet moment
             if n == 2:
                 shapelet_values = laguerre_shapelet(2, r_squared)
                 
-                # Check for NaNs in shapelet values
                 if torch.isnan(shapelet_values).any():
                     print(f"NaN detected in S2 shapelet values for image {i}")
                     shapelet_values = torch.zeros_like(r_squared)
                 
                 moment_value = torch.sum(img * shapelet_values)
                 
-                # Check for NaNs in moment value
                 if torch.isnan(moment_value):
                     print(f"NaN detected in S2 moment value for image {i}")
                     moment_value = torch.tensor(0.0, device=device, requires_grad=True)
                     
                 moments[f'S2'] = moment_value
             
-            # Fourth order shapelet moment
             elif n == 4:
                 shapelet_values = laguerre_shapelet(4, r_squared)
                 
-                # Check for NaNs in shapelet values
                 if torch.isnan(shapelet_values).any():
                     print(f"NaN detected in S4 shapelet values for image {i}")
                     shapelet_values = torch.zeros_like(r_squared)
                 
                 moment_value = torch.sum(img * shapelet_values)
                 
-                # Check for NaNs in moment value
                 if torch.isnan(moment_value):
                     print(f"NaN detected in S4 moment value for image {i}")
                     moment_value = torch.tensor(0.0, device=device, requires_grad=True)
@@ -746,18 +612,18 @@ def compute_shapelet_moments(image_tensor, max_order=4):
     
     return batch_shapelet_moments
 
-def visualize_shapelet_basis(max_order=4, num_points=100):
+def visualize_shapelet_basis(orders=[2, 4], num_points=100):
     """
     Visualize the Laguerre shapelet basis functions.
     
     Args:
-        max_order: Maximum order to display
+        orders: Orders to display
         num_points: Number of points for visualization
     """
     r_vals = torch.linspace(0, 5, num_points, requires_grad=True)
     
     plt.figure(figsize=(10, 6))
-    for n in [2, 4]:  # Only show 2nd and 4th order
+    for n in orders:
         shapelet_vals = []
         for r in r_vals:
             val = laguerre_shapelet(n, torch.tensor([r**2], requires_grad=True))
