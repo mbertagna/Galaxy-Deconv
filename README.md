@@ -1,7 +1,9 @@
 # An Exploration of Galaxy Shape-Based Loss Functions for Improved Shear Estimation in Image Deconvolution
 This project aims to improve shear estimation accuracy by training a deconvolution model with a loss function that emphasizes galaxy shape preservation rather than pixel-wise mean absolute error (MAE). This method draws inspiration from physics-driven machine learning techniques used to solve inverse problems for specific scientific applications. For more context, please check out my [presentation](https://docs.google.com/presentation/d/1GzlFERBeAunb54iO4kMIUtRP6zpAzw7-KMLmTRG2sPQ/edit?usp=sharing).
 
-An overview of the project is available in [final_report.ipynb](https://github.com/mbertagna/Galaxy-Deconv/blob/main/final_report.ipynb).
+An overview of the project is available in [final_report.ipynb](https://github.com/mbertagna/Galaxy-Deconv/blob/main/final_report.ipynb). To get started with this report or train your own models, follow the quickstart guide in [getting_started.md](https://github.com/mbertagna/Galaxy-Deconv/blob/main/getting_started.md).
+
+Additionally, this repository includes a guide for using the Quest supercomputer at Northwestern University in [nwu_quest_guide.md](https://github.com/mbertagna/Galaxy-Deconv/blob/main/nwu_quest_guide.md).
 
 This repository is built on and forked from:
 
