@@ -12,7 +12,7 @@ from models.Unrolled_ADMM import Unrolled_ADMM
 from models.unrolled_admm_gaussian import UnrolledADMMGaussian
 from utils.utils_data import get_dataloader
 from utils.utils_plot import plot_loss
-from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, BestEllipseLoss, MomentBasedLoss, ShapeletMomentsLoss
+from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, BestEllipseLoss, MomentBasedLoss, ShapeletMomentsLoss, FPFSLoss
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -72,6 +72,10 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
         )
     elif loss == 'ShapeletMomentsLoss':
         loss_fn = ShapeletMomentsLoss()
+    elif loss == 'FPFSLoss':
+        loss_fn = FPFSLoss()
+    elif loss == 'L1+FPFSLoss':
+        loss_fn = MultiScaleLoss(scales=1, aux_loss_fn=FPFSLoss())
     
     optimizer = Adam(params=model.parameters(), lr = lr)
 

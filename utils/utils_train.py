@@ -4,7 +4,7 @@ import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched, ellipse_fit_metric, compute_moments, compute_shapelet_moments
-
+from utils.utils_fourier import get_bfunc, project_img_onto_bfunc, get_shape_params
 
 # import utils.cadmos_lib as cl
 
@@ -291,6 +291,7 @@ class MultiScaleLoss(nn.Module):
 
         self.weights = torch.FloatTensor([1 / (2 ** scale) for scale in range(self.scales)])
         self.multiscales = [nn.AvgPool2d(2 ** scale, 2 ** scale) for scale in range(self.scales)]
+        
     def forward(self, output, target):
         loss = 0
         for i in range(self.scales):
@@ -298,12 +299,39 @@ class MultiScaleLoss(nn.Module):
             
             primary_loss = self.loss(output_i, target_i)
             
-            # add aux loss only at full scale
+            # Add aux loss only at full scale
             if not i: 
                 aux_loss = self.aux_loss_fn(output_i, target_i) if self.aux_loss_fn else 0
                 loss += self.aux_weight * aux_loss
             
             loss += self.weights[i] * primary_loss
+        
+        return loss
+
+class FPFSLoss(nn.Module):
+    def __init__(self, norm='L1'):
+        super(FPFSLoss, self).__init__()
+        self.bfunc, self.bfunc_key = get_bfunc(npix=48, pixel_scale=0.2, sigma_arcsec=0.52)
+
+        if norm == 'L1':
+            self.loss = nn.L1Loss()
+        elif norm == 'L2':
+            self.loss = nn.MSELoss()
+        else:
+            raise ValueError("Unsupported norm type. Use 'L1' or 'L2'.")
+        
+    def forward(self, output, target):
+        loss = 0.0
+
+        target_coeffs = project_img_onto_bfunc(target, self.bfunc)
+        output_coeffs = project_img_onto_bfunc(output, self.bfunc)
+
+        target_shape_params = get_shape_params(target_coeffs, self.bfunc_key)
+        output_shape_params = get_shape_params(output_coeffs, self.bfunc_key)
+
+        loss += self.loss(target_shape_params["total_flux"], output_shape_params["total_flux"])
+        loss += self.loss(target_shape_params["e1"], output_shape_params["e1"])
+        loss += self.loss(target_shape_params["e2"], output_shape_params["e2"])
         
         return loss
 
