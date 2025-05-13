@@ -470,73 +470,150 @@ def truncate_square(arr: NDArray, rcut: int) -> None:
         arr[:, npix2 + rcut + 1 :] = 0
     return
 
-def get_fpfs_kernel(
-                    npix = 48, 
-                    pixel_scale = 0.2, # LSST image pixel scale
-                    sigma_arcsec=0.52,
-                    ):
+# def get_fpfs_kernel(
+#                     npix = 48, 
+#                     pixel_scale = 0.2, # LSST image pixel scale
+#                     sigma_arcsec=0.52,
+#                     ):
+#     fpfs_kernel = FpfsKernel(npix=npix, pixel_scale=pixel_scale, sigma_arcsec=sigma_arcsec)
+#     return fpfs_kernel
+
+# def get_bfunc(
+#             npix = 48, 
+#             pixel_scale = 0.2, # LSST image pixel scale
+#             sigma_arcsec=0.52,
+#             ):
+#     fpfs_kernel = get_fpfs_kernel(npix=npix, pixel_scale=pixel_scale, sigma_arcsec=sigma_arcsec)
+#     bfunc = torch.tensor(fpfs_kernel.bfunc_use, dtype=torch.complex64)
+#     bfunc_key = fpfs_kernel.di
+#     return bfunc, bfunc_key
+
+# def project_img_onto_bfunc(img, bfunc):
+#     img_centered = torch.fft.ifftshift(img, dim=(-2, -1))
+#     img_fft = torch.fft.rfft2(img_centered, norm="backward")
+#     comp_mask = torch.ones_like(img_fft.real)
+#     comp_mask[..., 1:-1] *= 2.0
+
+#     if (img_fft.shape[-1] - 1) % 2 == 0:
+#         comp_mask[..., -1] = 1.0
+
+#     compensated_fft = img_fft * comp_mask
+
+#     coeffs_complex = torch.sum(
+#         compensated_fft.unsqueeze(-1) * bfunc.conj(),
+#         dim=(-3, -2)
+#     )
+
+#     coeffs = coeffs_complex[0].real
+
+#     return coeffs
+
+# def get_shape_params(coeffs, bfunc_key):
+#     m00 = coeffs[bfunc_key['m00']].real
+#     # m20 = coeffs[bfunc_key['m20']].real
+#     m22c = coeffs[bfunc_key['m22c']].real
+#     m22s = coeffs[bfunc_key['m22s']].real
+#     # m40 = coeffs[bfunc_key['m40']].real
+
+#     C = 0
+
+#     # Total flux
+#     total_flux = m00
+
+#     # # Size (r_rms)
+#     # size_rms = torch.sqrt(m20 / m00)
+
+#     # Ellipticity normalization denominator
+#     denom = m00 + C
+#     if denom == 0:
+#         raise ValueError("Ellipticity normalization denominator is zero.")
+
+#     # Ellipticity components
+#     e1 = m22c / denom
+#     e2 = m22s / denom
+
+#     shape_params = {
+#     "total_flux": total_flux,
+#     # "size_rms": size_rms,
+#     "e1": e1,
+#     "e2": e2,
+#     }
+
+#     return shape_params
+
+def get_fpfs_kernel(npix=48, pixel_scale=0.2, sigma_arcsec=0.52):
     fpfs_kernel = FpfsKernel(npix=npix, pixel_scale=pixel_scale, sigma_arcsec=sigma_arcsec)
     return fpfs_kernel
 
-def get_bfunc(
-            npix = 48, 
-            pixel_scale = 0.2, # LSST image pixel scale
-            sigma_arcsec=0.52,
-            ):
+
+def get_bfunc(npix=48, pixel_scale=0.2, sigma_arcsec=0.52):
     fpfs_kernel = get_fpfs_kernel(npix=npix, pixel_scale=pixel_scale, sigma_arcsec=sigma_arcsec)
     bfunc = torch.tensor(fpfs_kernel.bfunc_use, dtype=torch.complex64)
     bfunc_key = fpfs_kernel.di
     return bfunc, bfunc_key
 
-def project_img_onto_bfunc(img, bfunc):
-    img_centered = torch.fft.ifftshift(img, dim=(-2, -1))
-    img_fft = torch.fft.rfft2(img_centered, norm="backward")
-    comp_mask = torch.ones_like(img_fft.real)
+
+def project_img_onto_bfunc(imgs, bfunc):
+    # Handle single image case by adding batch dimension
+    if imgs.dim() == 2:
+        imgs = imgs.unsqueeze(0)
+    
+    # Center images and compute FFT
+    imgs_centered = torch.fft.ifftshift(imgs, dim=(-2, -1))
+    imgs_fft = torch.fft.rfft2(imgs_centered, norm="backward")
+    
+    # Compensation for rfft2
+    comp_mask = torch.ones_like(imgs_fft.real)
     comp_mask[..., 1:-1] *= 2.0
-
-    if (img_fft.shape[-1] - 1) % 2 == 0:
+    
+    if (imgs_fft.shape[-1] - 1) % 2 == 0:
         comp_mask[..., -1] = 1.0
-
-    compensated_fft = img_fft * comp_mask
-
+        
+    compensated_fft = imgs_fft * comp_mask
+    
+    # Project onto basis functions
+    # Add a dimension for basis functions and compute dot product
     coeffs_complex = torch.sum(
         compensated_fft.unsqueeze(-1) * bfunc.conj(),
         dim=(-3, -2)
-    )
+    ).squeeze(-2).real
+    
+    return coeffs_complex
 
-    coeffs = coeffs_complex.real[0]
 
-    return coeffs
-
-def get_shape_params(coeffs, bfunc_key):
-    m00 = coeffs[bfunc_key['m00']].real
-    # m20 = coeffs[bfunc_key['m20']].real
-    m22c = coeffs[bfunc_key['m22c']].real
-    m22s = coeffs[bfunc_key['m22s']].real
-    # m40 = coeffs[bfunc_key['m40']].real
-
-    C = 0
-
+def get_shape_params(coeffs, bfunc_key, C=0):
+    # Handle single coefficient set case
+    if coeffs.dim() == 1:
+        coeffs = coeffs.unsqueeze(0)
+        
+    # Extract moments
+    m00 = coeffs[:, bfunc_key['m00']].real
+    # m20 = coeffs[:, bfunc_key['m20']].real
+    m22c = coeffs[:, bfunc_key['m22c']].real
+    m22s = coeffs[:, bfunc_key['m22s']].real
+    # m40 = coeffs[:, bfunc_key['m40']].real
+    
     # Total flux
     total_flux = m00
-
+    
     # # Size (r_rms)
     # size_rms = torch.sqrt(m20 / m00)
-
+    
     # Ellipticity normalization denominator
     denom = m00 + C
-    if denom == 0:
-        raise ValueError("Ellipticity normalization denominator is zero.")
-
+    if torch.any(denom == 0):
+        raise ValueError("Ellipticity normalization denominator contains zero values.")
+    
     # Ellipticity components
     e1 = m22c / denom
     e2 = m22s / denom
-
+    
+    # Create batch-aware output dictionary
     shape_params = {
-    "total_flux": total_flux,
-    # "size_rms": size_rms,
-    "e1": e1,
-    "e2": e2,
+        "total_flux": total_flux,
+        # "size_rms": size_rms,
+        "e1": e1,
+        "e2": e2,
     }
-
+    
     return shape_params

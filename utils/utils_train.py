@@ -314,7 +314,9 @@ class FPFSLoss(nn.Module):
         self.bfunc, self.bfunc_key = get_bfunc(npix=48, pixel_scale=0.2, sigma_arcsec=0.52)
 
         if norm == 'L1':
-            self.loss = nn.L1Loss()
+            self.loss = nn.L1Loss(
+                # reduction="sum"
+            )
         elif norm == 'L2':
             self.loss = nn.MSELoss()
         else:
@@ -322,18 +324,56 @@ class FPFSLoss(nn.Module):
         
     def forward(self, outputs, targets):
         loss = 0.0
-        for output, target in zip(outputs, targets):
-            target_coeffs = project_img_onto_bfunc(target, self.bfunc)
-            output_coeffs = project_img_onto_bfunc(output, self.bfunc)
 
-            target_shape_params = get_shape_params(target_coeffs, self.bfunc_key)
-            output_shape_params = get_shape_params(output_coeffs, self.bfunc_key)
+        target_coeffs = project_img_onto_bfunc(targets, self.bfunc)
+        output_coeffs = project_img_onto_bfunc(outputs, self.bfunc)
 
-            # loss += self.loss(target_shape_params["total_flux"], output_shape_params["total_flux"])
-            loss += self.loss(target_shape_params["e1"], output_shape_params["e1"])
-            loss += self.loss(target_shape_params["e2"], output_shape_params["e2"])
+        target_shape_params = get_shape_params(target_coeffs, self.bfunc_key)
+        output_shape_params = get_shape_params(output_coeffs, self.bfunc_key)
+
+        # loss += self.loss(output_shape_params["total_flux"], target_shape_params["total_flux"])
+        loss += self.loss(output_shape_params["e1"], target_shape_params["e1"])
+        loss += self.loss(output_shape_params["e2"], target_shape_params["e2"])
         
         return loss
+    
+class FPFSCoeffLoss(nn.Module):
+    def __init__(self, norm='L1'):
+        super(FPFSCoeffLoss, self).__init__()
+        self.bfunc, self.bfunc_key = get_bfunc(npix=48, pixel_scale=0.2, sigma_arcsec=0.52)
+        self.loss_coeffs = [
+            # "m00",
+            "m20",
+            "m22c",
+            "m22s",
+            "m40",
+            "m42c",
+            "m42s",
+            "m44c",
+            "m44s",
+            "m60",
+            "m64c",
+            "m64s",
+        ]
+        self.indices = [self.bfunc_key[c] for c in self.loss_coeffs]
+
+        if norm == 'L1':
+            self.loss = nn.L1Loss(
+                # reduction="sum"
+            )
+        elif norm == 'L2':
+            self.loss = nn.MSELoss()
+        else:
+            raise ValueError("Unsupported norm type. Use 'L1' or 'L2'.")
+        
+    def forward(self, outputs, targets):
+        target_coeffs = project_img_onto_bfunc(targets, self.bfunc)
+        output_coeffs = project_img_onto_bfunc(outputs, self.bfunc)
+
+        target_values = target_coeffs[:, self.indices].real
+        output_values = output_coeffs[:, self.indices].real
+
+        return self.loss(output_values, target_values)
 
 class ShapeConstraint(nn.Module):
     def __init__(self, device, fov_pixels=48, gamma=1, n_shearlet=2):
