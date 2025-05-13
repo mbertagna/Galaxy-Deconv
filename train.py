@@ -12,7 +12,7 @@ from models.Unrolled_ADMM import Unrolled_ADMM
 from models.unrolled_admm_gaussian import UnrolledADMMGaussian
 from utils.utils_data import get_dataloader
 from utils.utils_plot import plot_loss
-from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, BestEllipseLoss, MomentBasedLoss, ShapeletMomentsLoss, FPFSLoss
+from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, BestEllipseLoss, MomentBasedLoss, ShapeletMomentsLoss, FPFSLoss, FPFSCoeffLoss
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -74,6 +74,8 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
         loss_fn = ShapeletMomentsLoss()
     elif loss == 'FPFSLoss':
         loss_fn = FPFSLoss()
+    elif loss == 'FPFSCoeffLoss':
+        loss_fn = FPFSCoeffLoss()
     elif loss == 'L1_FPFSLoss':
         loss_fn = MultiScaleLoss(scales=1, aux_loss_fn=FPFSLoss())
     
@@ -194,7 +196,7 @@ if __name__ == "__main__":
     parser.add_argument('--filter', type=str, default='Laplacian', choices=['Identity', 'Laplacian'])
     parser.add_argument('--n_epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss', 'FPFSLoss', 'L1_FPFSLoss'])
+    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss', 'FPFSLoss', 'L1_FPFSLoss', 'FPFSCoeffLoss'])
     parser.add_argument('--train_val_split', type=float, default=0.9)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
