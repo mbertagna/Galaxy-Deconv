@@ -467,7 +467,7 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     
     if opt.task == 'Deconv':
-        generate_data_deconv(data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', n_train=opt.n_train, load_info=opt.load_info,
+        generate_data_deconv(data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv//', n_train=opt.n_train, load_info=opt.load_info,
                              survey=opt.survey, I=opt.I, fov_pixels=opt.fov_pixels, pixel_scale=opt.pixel_scale, upsample=opt.upsample,
                              snrs=[20, 40, 60, 80, 100, 150, 200],
                              shear_errs=[0.003, 0.005, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],

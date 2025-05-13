@@ -320,18 +320,18 @@ class FPFSLoss(nn.Module):
         else:
             raise ValueError("Unsupported norm type. Use 'L1' or 'L2'.")
         
-    def forward(self, output, target):
+    def forward(self, outputs, targets):
         loss = 0.0
+        for output, target in zip(outputs, targets):
+            target_coeffs = project_img_onto_bfunc(target, self.bfunc)
+            output_coeffs = project_img_onto_bfunc(output, self.bfunc)
 
-        target_coeffs = project_img_onto_bfunc(target, self.bfunc)
-        output_coeffs = project_img_onto_bfunc(output, self.bfunc)
+            target_shape_params = get_shape_params(target_coeffs, self.bfunc_key)
+            output_shape_params = get_shape_params(output_coeffs, self.bfunc_key)
 
-        target_shape_params = get_shape_params(target_coeffs, self.bfunc_key)
-        output_shape_params = get_shape_params(output_coeffs, self.bfunc_key)
-
-        loss += self.loss(target_shape_params["total_flux"], output_shape_params["total_flux"])
-        loss += self.loss(target_shape_params["e1"], output_shape_params["e1"])
-        loss += self.loss(target_shape_params["e2"], output_shape_params["e2"])
+            # loss += self.loss(target_shape_params["total_flux"], output_shape_params["total_flux"])
+            loss += self.loss(target_shape_params["e1"], output_shape_params["e1"])
+            loss += self.loss(target_shape_params["e2"], output_shape_params["e2"])
         
         return loss
 

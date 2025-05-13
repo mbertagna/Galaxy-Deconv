@@ -24,7 +24,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove_SubNet=False, filter='Laplacian',
           n_epochs=10, lr=1e-4, loss='MultiScale',
-          data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train_val_split=0.8, batch_size=32,
+          data_path='./simulated_datasets/LSST_23.5_deconv/', train_val_split=0.8, batch_size=32,
           model_save_path='./saved_models/', pretrained_epochs=0):
     
     model_name = get_model_name(method=model_name, loss=loss, filter=filter, n_iters=n_iters, llh=llh, PnP=PnP, remove_SubNet=remove_SubNet)
@@ -74,7 +74,7 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
         loss_fn = ShapeletMomentsLoss()
     elif loss == 'FPFSLoss':
         loss_fn = FPFSLoss()
-    elif loss == 'L1+FPFSLoss':
+    elif loss == 'L1_FPFSLoss':
         loss_fn = MultiScaleLoss(scales=1, aux_loss_fn=FPFSLoss())
     
     optimizer = Adam(params=model.parameters(), lr = lr)
@@ -169,7 +169,8 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
                         val_loss/len(val_loader)))
         
         # Save model.
-        if val_loss_min > val_loss or (epoch + 1) % 5 == 0:
+        # if val_loss_min > val_loss or (epoch + 1) % 5 == 0:
+        if True:
             if val_loss_min > val_loss:
                 val_loss_min = val_loss
                 epoch_min = epoch
@@ -193,7 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--filter', type=str, default='Laplacian', choices=['Identity', 'Laplacian'])
     parser.add_argument('--n_epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss'])
+    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss', 'FPFSLoss', 'L1_FPFSLoss'])
     parser.add_argument('--train_val_split', type=float, default=0.9)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
@@ -202,5 +203,5 @@ if __name__ == "__main__":
 
     train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
           n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss,
-          data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
+          data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
           model_save_path='./saved_models_shape_loss/', pretrained_epochs=opt.pretrained_epochs)

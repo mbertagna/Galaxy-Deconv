@@ -42,12 +42,12 @@ def down_sample(input, rate=4):
 
 class Galaxy_Dataset(Dataset):
     """Simulated Galaxy Image Dataset inherited from `torch.utils.data.Dataset`."""
-    def __init__(self, data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train=True,
+    def __init__(self, data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', train=True,
                  psf_folder='psf/', obs_folder='obs/', gt_folder='gt/'):
         """Construction function for the PyTorch Galaxy Dataset.
 
         Args:
-            data_path (`str`, optional): Path to the dataset. Defaults to `'/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv'`.
+            data_path (`str`, optional): Path to the dataset. Defaults to `'/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/'`.
             train (`bool`, optional): Whether the dataset is generated for training or testing. Defaults to True.
             psf_folder (`str`, optional): Path to the PSF image folder. Defaults to `'psf/'`.
             obs_folder (`str`, optional): Path to the observed image folder. Defaults to `'obs/'`.
@@ -103,13 +103,13 @@ class Galaxy_Dataset(Dataset):
         return (obs, psf, alpha), gt
             
             
-def get_dataloader(data_path='/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv', train=True, train_val_split=0.8, batch_size=32,
+def get_dataloader(data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', train=True, train_val_split=0.8, batch_size=32,
                    num_workers=18, pin_memory=True,
                    psf_folder='psf/', obs_folder='obs/', gt_folder='gt/'):
     """Generate PyTorch dataloaders for training or testing.
 
     Args:
-        data_path (`str`, optional): Path the dataset. Defaults to `'/home/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv'`.
+        data_path (`str`, optional): Path the dataset. Defaults to `'/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/'`.
         train (`bool`, optional): Whether to generate train dataloader or test dataloader. Defaults to True.
         train_val_split (`float`, optional): Proportion of data used in train dataloader in train dataset, the rest will be used in valid dataloader. Defaults to `0.8`.
         batch_size (`int`, optional): Batch size for training dataset. Defaults to 32.
