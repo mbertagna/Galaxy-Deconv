@@ -77,7 +77,9 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     elif loss == 'FPFSCoeffLoss':
         loss_fn = FPFSCoeffLoss()
     elif loss == 'L1_FPFSLoss':
-        loss_fn = MultiScaleLoss(scales=1, aux_loss_fn=FPFSLoss())
+        loss_fn = MultiScaleLoss(scales=1, aux_loss_fn=FPFSLoss(), aux_weight=0.1)
+    elif loss == 'L1':
+        loss_fn = MultiScaleLoss(scales=1)
     
     optimizer = Adam(params=model.parameters(), lr = lr)
 
@@ -196,7 +198,7 @@ if __name__ == "__main__":
     parser.add_argument('--filter', type=str, default='Laplacian', choices=['Identity', 'Laplacian'])
     parser.add_argument('--n_epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss', 'FPFSLoss', 'L1_FPFSLoss', 'FPFSCoeffLoss'])
+    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss', 'FPFSLoss', 'L1_FPFSLoss', 'FPFSCoeffLoss', 'L1'])
     parser.add_argument('--train_val_split', type=float, default=0.9)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
