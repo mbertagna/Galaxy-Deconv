@@ -4,7 +4,7 @@ import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.fit_ellipse import transform_tensor_batched, safe_ellipse_params_batched, ellipse_fit_metric, compute_moments, compute_shapelet_moments
-from utils.utils_fourier import get_bfunc, project_img_onto_bfunc, get_shape_params
+from utils.utils_fourier import get_bfunc, project_img_onto_bfunc, get_shape_params, compute_centroid, fft_translate
 
 # import utils.cadmos_lib as cl
 
@@ -338,9 +338,9 @@ class FPFSLoss(nn.Module):
         return loss
     
 class FPFSCoeffLoss(nn.Module):
-    def __init__(self, norm='L1'):
+    def __init__(self, norm='L1', shape=(48, 48)):
         super(FPFSCoeffLoss, self).__init__()
-        self.bfunc, self.bfunc_key = get_bfunc(npix=48, pixel_scale=0.2, sigma_arcsec=0.52)
+        self.bfunc, self.bfunc_key = get_bfunc(npix=shape[0], pixel_scale=0.2, sigma_arcsec=0.52)
         self.loss_coeffs = [
             # "m00",
             "m20",
@@ -351,11 +351,15 @@ class FPFSCoeffLoss(nn.Module):
             "m42s",
             "m44c",
             "m44s",
-            "m60",
-            "m64c",
-            "m64s",
+            # "m60",
+            # "m64c",
+            # "m64s",
         ]
         self.indices = [self.bfunc_key[c] for c in self.loss_coeffs]
+
+        rows, cols = shape
+        self.xc = cols / 2
+        self.yc = rows / 2
 
         if norm == 'L1':
             self.loss = nn.L1Loss(
@@ -367,8 +371,14 @@ class FPFSCoeffLoss(nn.Module):
             raise ValueError("Unsupported norm type. Use 'L1' or 'L2'.")
         
     def forward(self, outputs, targets):
-        target_coeffs = project_img_onto_bfunc(targets, self.bfunc)
-        output_coeffs = project_img_onto_bfunc(outputs, self.bfunc)
+        xc_targets, yc_targets = compute_centroid(targets)
+        xc_outputs, yc_outputs = compute_centroid(outputs)
+
+        targets_centered = fft_translate(targets, self.xc - xc_targets, self.yc - yc_targets)
+        outputs_centered = fft_translate(outputs, self.xc - xc_outputs, self.yc - yc_outputs)
+
+        target_coeffs = project_img_onto_bfunc(targets_centered, self.bfunc)
+        output_coeffs = project_img_onto_bfunc(outputs_centered, self.bfunc)
 
         target_values = target_coeffs[:, self.indices].real
         output_values = output_coeffs[:, self.indices].real

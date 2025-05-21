@@ -470,76 +470,6 @@ def truncate_square(arr: NDArray, rcut: int) -> None:
         arr[:, npix2 + rcut + 1 :] = 0
     return
 
-# def get_fpfs_kernel(
-#                     npix = 48, 
-#                     pixel_scale = 0.2, # LSST image pixel scale
-#                     sigma_arcsec=0.52,
-#                     ):
-#     fpfs_kernel = FpfsKernel(npix=npix, pixel_scale=pixel_scale, sigma_arcsec=sigma_arcsec)
-#     return fpfs_kernel
-
-# def get_bfunc(
-#             npix = 48, 
-#             pixel_scale = 0.2, # LSST image pixel scale
-#             sigma_arcsec=0.52,
-#             ):
-#     fpfs_kernel = get_fpfs_kernel(npix=npix, pixel_scale=pixel_scale, sigma_arcsec=sigma_arcsec)
-#     bfunc = torch.tensor(fpfs_kernel.bfunc_use, dtype=torch.complex64)
-#     bfunc_key = fpfs_kernel.di
-#     return bfunc, bfunc_key
-
-# def project_img_onto_bfunc(img, bfunc):
-#     img_centered = torch.fft.ifftshift(img, dim=(-2, -1))
-#     img_fft = torch.fft.rfft2(img_centered, norm="backward")
-#     comp_mask = torch.ones_like(img_fft.real)
-#     comp_mask[..., 1:-1] *= 2.0
-
-#     if (img_fft.shape[-1] - 1) % 2 == 0:
-#         comp_mask[..., -1] = 1.0
-
-#     compensated_fft = img_fft * comp_mask
-
-#     coeffs_complex = torch.sum(
-#         compensated_fft.unsqueeze(-1) * bfunc.conj(),
-#         dim=(-3, -2)
-#     )
-
-#     coeffs = coeffs_complex[0].real
-
-#     return coeffs
-
-# def get_shape_params(coeffs, bfunc_key):
-#     m00 = coeffs[bfunc_key['m00']].real
-#     # m20 = coeffs[bfunc_key['m20']].real
-#     m22c = coeffs[bfunc_key['m22c']].real
-#     m22s = coeffs[bfunc_key['m22s']].real
-#     # m40 = coeffs[bfunc_key['m40']].real
-
-#     C = 0
-
-#     # Total flux
-#     total_flux = m00
-
-#     # # Size (r_rms)
-#     # size_rms = torch.sqrt(m20 / m00)
-
-#     # Ellipticity normalization denominator
-#     denom = m00 + C
-#     if denom == 0:
-#         raise ValueError("Ellipticity normalization denominator is zero.")
-
-#     # Ellipticity components
-#     e1 = m22c / denom
-#     e2 = m22s / denom
-
-#     shape_params = {
-#     "total_flux": total_flux,
-#     # "size_rms": size_rms,
-#     "e1": e1,
-#     "e2": e2,
-#     }
-
-#     return shape_params
 
 def get_fpfs_kernel(npix=48, pixel_scale=0.2, sigma_arcsec=0.52):
     fpfs_kernel = FpfsKernel(npix=npix, pixel_scale=pixel_scale, sigma_arcsec=sigma_arcsec)
@@ -573,25 +503,25 @@ def project_img_onto_bfunc(imgs, bfunc):
     
     # Project onto basis functions
     # Add a dimension for basis functions and compute dot product
-    coeffs_complex = torch.sum(
+    coeffs = torch.sum(
         compensated_fft.unsqueeze(-1) * bfunc.conj(),
         dim=(-3, -2)
     ).squeeze(-2).real
     
-    return coeffs_complex
+    return coeffs
 
 
-def get_shape_params(coeffs, bfunc_key, C=0):
+def get_shape_params(coeffs, bfunc_key, C=0.0):
     # Handle single coefficient set case
     if coeffs.dim() == 1:
         coeffs = coeffs.unsqueeze(0)
         
     # Extract moments
-    m00 = coeffs[:, bfunc_key['m00']].real
-    # m20 = coeffs[:, bfunc_key['m20']].real
-    m22c = coeffs[:, bfunc_key['m22c']].real
-    m22s = coeffs[:, bfunc_key['m22s']].real
-    # m40 = coeffs[:, bfunc_key['m40']].real
+    m00 = coeffs[:, bfunc_key['m00']]
+    # m20 = coeffs[:, bfunc_key['m20']]
+    m22c = coeffs[:, bfunc_key['m22c']]
+    m22s = coeffs[:, bfunc_key['m22s']]
+    # m40 = coeffs[:, bfunc_key['m40']]
     
     # Total flux
     total_flux = m00
@@ -617,3 +547,160 @@ def get_shape_params(coeffs, bfunc_key, C=0):
     }
     
     return shape_params
+
+
+def compute_centroid(img: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    # Add batch dimension if not present
+    if img.dim() == 2:
+        img = img.unsqueeze(0)
+    
+    # Handle case where input has channel dimension [batch_size, channels, height, width]
+    if img.dim() == 4:
+        # If there's only one channel, we can squeeze it
+        if img.shape[1] == 1:
+            img = img.squeeze(1)
+        # If there are multiple channels, average them
+        else:
+            img = img.mean(dim=1)
+    
+    b, h, w = img.shape
+    
+    # Create coordinate grids
+    y_grid, x_grid = torch.meshgrid(
+        torch.arange(h, device=img.device), 
+        torch.arange(w, device=img.device), 
+        indexing="ij"
+    )
+    
+    # Expand grids to match batch dimension
+    x_grid = x_grid.expand(b, h, w)
+    y_grid = y_grid.expand(b, h, w)
+    
+    # Calculate total flux for each image in batch
+    total_flux = img.sum(dim=(-2, -1), keepdim=True)
+    
+    # Calculate centroids
+    x_c = (img * x_grid).sum(dim=(-2, -1)) / total_flux.squeeze(-1).squeeze(-1)
+    y_c = (img * y_grid).sum(dim=(-2, -1)) / total_flux.squeeze(-1).squeeze(-1)
+    
+    return x_c, y_c
+
+def fft_translate(img: torch.Tensor, dx: torch.Tensor, dy: torch.Tensor) -> torch.Tensor:
+    # Store original shape and dimensions
+    original_shape = img.shape
+    original_dim = img.dim()
+    
+    # Ensure 4D input [batch, channel, height, width]
+    if original_dim == 3:
+        img = img.unsqueeze(1)  # Add channel dim
+    elif original_dim == 2:
+        img = img.unsqueeze(0).unsqueeze(0)  # Add batch and channel dims
+    
+    b, c, h, w = img.shape
+    
+    # Ensure dx and dy have correct shape [batch_size]
+    if dx.dim() == 0:
+        dx = dx.unsqueeze(0).expand(b)
+    elif dx.dim() == 1 and len(dx) != b:
+        dx = dx.expand(b)
+        
+    if dy.dim() == 0:
+        dy = dy.unsqueeze(0).expand(b)
+    elif dy.dim() == 1 and len(dy) != b:
+        dy = dy.expand(b)
+    
+    # Reshape to combine batch and channels for processing [b*c, h, w]
+    img_reshaped = img.reshape(-1, h, w)
+    dx_reshaped = dx.repeat_interleave(c)
+    dy_reshaped = dy.repeat_interleave(c)
+    
+    # Fourier grid frequencies
+    ky = torch.fft.fftfreq(h, device=img.device).reshape(-1, 1)  # [H, 1]
+    kx = torch.fft.fftfreq(w, device=img.device).reshape(1, -1)  # [1, W]
+    
+    # Shift each image in Fourier space
+    shifted = []
+    for img_single, dx_single, dy_single in zip(img_reshaped, dx_reshaped, dy_reshaped):
+        # Phase ramp (exp(-2πi (k_x Δx + k_y Δy)))
+        phase_ramp = torch.exp(-2j * np.pi * (dy_single * ky + dx_single * kx))
+        
+        # Apply shift
+        fft_img = torch.fft.fft2(img_single)
+        shifted_single = torch.fft.ifft2(fft_img * phase_ramp).real
+        shifted.append(shifted_single)
+    
+    # Reconstruct original shape
+    shifted = torch.stack(shifted).reshape(original_shape)
+    
+    # Remove added dimensions if input wasn't 4D
+    if original_dim == 3:
+        shifted = shifted.squeeze(1)
+    elif original_dim == 2:
+        shifted = shifted.squeeze(0).squeeze(0)
+    
+    return shifted
+
+# def shift_image(img: torch.Tensor, x_c: torch.Tensor, y_c: torch.Tensor) -> torch.Tensor:
+#     # Store original dimensions and shape
+#     original_dim = img.dim()
+#     original_shape = img.shape
+    
+#     # Add batch dimension if not present
+#     if original_dim == 2:
+#         img = img.unsqueeze(0)
+    
+#     # Handle images with channel dimension [batch_size, channels, height, width]
+#     has_channels = False
+#     if img.dim() == 4:
+#         has_channels = True
+#         b, c, h, w = img.shape
+#         # Reshape to [b*c, h, w] for processing
+#         img = img.reshape(-1, h, w)
+#         # Adjust x_c and y_c to match the new batch dimension if needed
+#         if x_c.dim() == 1 and len(x_c) == b:
+#             x_c = x_c.repeat_interleave(c)
+#         if y_c.dim() == 1 and len(y_c) == b:
+#             y_c = y_c.repeat_interleave(c)
+#     else:
+#         b, h, w = img.shape
+    
+#     # Ensure x_c and y_c have batch dimensions and correct shapes
+#     if x_c.dim() == 0:
+#         x_c = x_c.unsqueeze(0).expand(b)
+#     elif x_c.dim() == 1 and len(x_c) != b:
+#         x_c = x_c.expand(b)
+        
+#     if y_c.dim() == 0:
+#         y_c = y_c.unsqueeze(0).expand(b)
+#     elif y_c.dim() == 1 and len(y_c) != b:
+#         y_c = y_c.expand(b)
+    
+#     # Target center
+#     center_x = (w - 1) / 2
+#     center_y = (h - 1) / 2
+    
+#     # Calculate shift (current position - target position)
+#     dx = x_c - center_x
+#     dy = y_c - center_y
+    
+#     # Create the transformation matrix for each image in batch
+#     theta = torch.zeros(b, 2, 3, device=img.device)
+#     theta[:, 0, 0] = 1.0  # x scaling
+#     theta[:, 1, 1] = 1.0  # y scaling
+#     theta[:, 0, 2] = 2 * dx / (w - 1)  # x translation normalized to [-1, 1] range
+#     theta[:, 1, 2] = 2 * dy / (h - 1)  # y translation normalized to [-1, 1] range
+    
+#     # Generate sampling grid
+#     grid = F.affine_grid(theta, size=(b, 1, h, w), align_corners=True)
+    
+#     # Apply grid sample to shift images
+#     img_shifted = F.grid_sample(img.unsqueeze(1), grid, align_corners=True).squeeze(1)
+    
+#     # Reshape back to original format if needed
+#     if has_channels:
+#         img_shifted = img_shifted.reshape(original_shape[0], original_shape[1], h, w)
+#     # Return with original dimensions if input wasn't batched
+#     elif original_dim == 2:
+#         img_shifted = img_shifted.squeeze(0)
+    
+#     return img_shifted
