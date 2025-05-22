@@ -59,7 +59,7 @@ def test_shear(method, n_iters, model_file, n_gal, snrs, data_path, result_path)
     for snr in snrs:
         logger.info(' Running shear test with %s SNR=%s galaxies.\n', n_gal, snr)
         test_loader = get_dataloader(data_path=data_path, train=False,
-                                     obs_folder=f'obs_{snr}/', gt_folder=f'gt_{snr}/')
+                                     obs_folder=f'obs_{snr}/', gt_folder=f'gt_{snr}/', num_workers=20)
         
         rec_shear, gt_shear = [], []
         for ((obs, psf, alpha), gt), idx in zip(test_loader, tqdm(range(n_gal))):
@@ -116,7 +116,7 @@ def test_time(method, n_iters, model_file, n_gal, data_path, result_path):
     logger.info(' Running time test with %s galaxies.', n_gal)
     logger.info(' Testing method: %s', method)
     
-    test_loader = get_dataloader(data_path=data_path, train=False)
+    test_loader = get_dataloader(data_path=data_path, train=False, num_workers=20)
     
     psf_delta = delta_2D(48, 48)
     
@@ -240,11 +240,11 @@ if __name__ == "__main__":
         snrs = [20, 40, 60, 80, 100, 150, 200]
         for method, (n_iters, model_file) in methods.items():
             test_shear(method=method, n_iters=n_iters, model_file=model_file, n_gal=opt.n_gal, snrs=snrs,
-                       data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', result_path=opt.result_path)
+                       data_path='/projects/e32704/michael/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', result_path=opt.result_path)
     elif opt.test == 'time':
         for method, (n_iters, model_file) in methods.items():
             for i in range(3): # Run 2 dummy test first to warm up the GPU.
                 test_time(method=method, n_iters=n_iters, model_file=model_file, n_gal=opt.n_gal,
-                          data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', result_path=opt.result_path)
+                          data_path='/projects/e32704/michael/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', result_path=opt.result_path)
     else:
         raise ValueError("Invalid test type.")
