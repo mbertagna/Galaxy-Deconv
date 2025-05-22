@@ -9,7 +9,8 @@ from tqdm import tqdm
 
 from models.Richard_Lucy import Richard_Lucy
 from models.Tikhonet import Tikhonet
-from models.Unrolled_ADMM import Unrolled_ADMM
+# from models.Unrolled_ADMM import Unrolled_ADMM
+from models.unrolled_admm_gaussian import UnrolledADMMGaussian
 from models.Wiener import Wiener
 from utils.utils_data import get_dataloader
 from utils.utils_test import delta_2D, estimate_shear
@@ -39,9 +40,11 @@ def test_shear(method, n_iters, model_file, n_gal, snrs, data_path, result_path)
     elif method == 'ShapeNet' or 'Laplacian' in method:
         model = Tikhonet(filter='Laplacian')
     elif 'Gaussian' in method:
-        model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
+        # model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
+        model = UnrolledADMMGaussian(n_iters=n_iters, PnP=True)
     else:
-        model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
+        # model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
+        model = UnrolledADMMGaussian(n_iters=n_iters, llh='Poisson', PnP=True)
 
     if model is not None:
         model.to(device)
@@ -133,9 +136,11 @@ def test_time(method, n_iters, model_file, n_gal, data_path, result_path):
     elif method == 'ShapeNet' or 'Laplacian' in method:
         model = Tikhonet(filter='Laplacian')
     elif 'Gaussian' in method:
-        model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
+        # model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
+        model = UnrolledADMMGaussian(n_iters=n_iters, PnP=True)
     else:
-        model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
+        # model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
+        model = UnrolledADMMGaussian(n_iters=n_iters, llh='Poisson', PnP=True)
 
     if model is not None:
         model.to(device)
@@ -207,23 +212,27 @@ if __name__ == "__main__":
     
     # Uncomment the methods to be tested.
     methods = {
-        'No_Deconv': (0, None), 
-        'FPFS': (0, None),
+        # 'No_Deconv': (0, None), 
+        # 'FPFS': (0, None),
         # 'Wiener': (0, None), 
-        'Richard-Lucy(10)': (10, None), 
-        'Richard-Lucy(20)': (20, None), 
-        'Richard-Lucy(30)': (30, None), 
-        'Richard-Lucy(50)': (50, None), 
-        'Richard-Lucy(100)': (100, None),
-        'Tikhonet_Laplacian': (0, "saved_models_200/Tikhonet_Laplacian_MSE_20epochs.pth"), 
-        'ShapeNet': (0, "saved_models_200/ShapeNet_Laplacian_50epochs.pth"), 
+        # 'Richard-Lucy(10)': (10, None), 
+        # 'Richard-Lucy(20)': (20, None), 
+        # 'Richard-Lucy(30)': (30, None), 
+        # 'Richard-Lucy(50)': (50, None), 
+        # 'Richard-Lucy(100)': (100, None),
+        # 'Tikhonet_Laplacian': (0, "saved_models_200/Tikhonet_Laplacian_MSE_20epochs.pth"), 
+        # 'ShapeNet': (0, "saved_models_200/ShapeNet_Laplacian_50epochs.pth"), 
         # 'ADMMNet': (8, None),
-        'Unrolled_ADMM_Gaussian(2)': (2, "saved_models_200/Gaussian_PnP_ADMM_2iters_MultiScale_20epochs.pth"), 
-        'Unrolled_ADMM_Gaussian(4)': (4, "saved_models_200/Gaussian_PnP_ADMM_4iters_MultiScale_20epochs.pth"), 
-        'Unrolled_ADMM_Gaussian(8)': (8, "saved_models_200/Gaussian_PnP_ADMM_8iters_MultiScale_20epochs.pth"),
+        # 'Unrolled_ADMM_Gaussian(2)': (2, "saved_models_200/Gaussian_PnP_ADMM_2iters_MultiScale_20epochs.pth"), 
+        # 'Unrolled_ADMM_Gaussian(4)': (4, "saved_models_200/Gaussian_PnP_ADMM_4iters_MultiScale_20epochs.pth"), 
+        # 'Unrolled_ADMM_Gaussian(8)': (8, "saved_models_200/Gaussian_PnP_ADMM_8iters_MultiScale_20epochs.pth"),
         # 'Unrolled_ADMM_Gaussian(8)_MSE': (8, "saved_models_200/Gaussian_PnP_ADMM_8iters_MSE_20epochs.pth"),
         # 'Unrolled_ADMM_Gaussian(8)_Shape': (8, "saved_models_200/Gaussian_PnP_ADMM_8iters_Shape_20epochs.pth"),
         # 'Unrolled_ADMM_Gaussian(8)_No_SubNet': (8, "saved_models_200/Gaussian_PnP_ADMM_8iters_No_SubNet_MultiScale_20epochs.pth")
+
+        # 'Unrolled_ADMM_Gaussian(2)': (2, "saved_models_shape_loss/Gaussian_PnP_ADMM_2iters_L1_FPFSLoss_2epochs.pth"), 
+        'Unrolled_ADMM_Gaussian(2)_L1': (2, "saved_models_bs64/may18/Gaussian_PnP_ADMM_2iters_L1_10epochs.pth"), 
+        'Unrolled_ADMM_Gaussian(2)_FPFSCoeffLoss_m20_m44s_NoNorm_FFTCenter': (2, "saved_models_bs64/may22/Gaussian_PnP_ADMM_2iters_FPFSCoeffLoss_10epochs.pth"), 
     }
     
 
@@ -231,11 +240,11 @@ if __name__ == "__main__":
         snrs = [20, 40, 60, 80, 100, 150, 200]
         for method, (n_iters, model_file) in methods.items():
             test_shear(method=method, n_iters=n_iters, model_file=model_file, n_gal=opt.n_gal, snrs=snrs,
-                       data_path='/mnt/WD6TB/tianaoli/dataset/LSST_23.5_deconv/', result_path=opt.result_path)
+                       data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', result_path=opt.result_path)
     elif opt.test == 'time':
         for method, (n_iters, model_file) in methods.items():
             for i in range(3): # Run 2 dummy test first to warm up the GPU.
                 test_time(method=method, n_iters=n_iters, model_file=model_file, n_gal=opt.n_gal,
-                          data_path='/mnt/WD6TB/tianaoli/dataset/LSST_23.5_deconv/', result_path=opt.result_path)
+                          data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', result_path=opt.result_path)
     else:
         raise ValueError("Invalid test type.")
