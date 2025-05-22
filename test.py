@@ -231,8 +231,8 @@ if __name__ == "__main__":
         # 'Unrolled_ADMM_Gaussian(8)_No_SubNet': (8, "saved_models_200/Gaussian_PnP_ADMM_8iters_No_SubNet_MultiScale_20epochs.pth")
 
         # 'Unrolled_ADMM_Gaussian(2)': (2, "saved_models_shape_loss/Gaussian_PnP_ADMM_2iters_L1_FPFSLoss_2epochs.pth"), 
-        'Unrolled_ADMM_Gaussian(2)_L1': (2, "saved_models_bs64/may18/Gaussian_PnP_ADMM_2iters_L1_10epochs.pth"), 
-        'Unrolled_ADMM_Gaussian(2)_FPFSCoeffLoss_m20_m44s_NoNorm_FFTCenter': (2, "saved_models_bs64/may22/Gaussian_PnP_ADMM_2iters_FPFSCoeffLoss_10epochs.pth"), 
+        'Unrolled_ADMM_Gaussian(2)_L1': (2, "saved_models_shape_loss/Gaussian_PnP_ADMM_2iters_L1_10epochs.pth"), 
+        'Unrolled_ADMM_Gaussian(2)_FPFSCoeffLoss_m20_m44s_NoNorm_FFTCenter': (2, "saved_models_shape_loss/Gaussian_PnP_ADMM_2iters_FPFSCoeffLoss_10epochs.pth"), 
     }
     
 
