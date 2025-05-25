@@ -212,8 +212,8 @@ if __name__ == "__main__":
     
     # Uncomment the methods to be tested.
     methods = {
-        # 'No_Deconv': (0, None), 
-        # 'FPFS': (0, None),
+        'No_Deconv': (0, None), 
+        'FPFS': (0, None),
         # 'Wiener': (0, None), 
         # 'Richard-Lucy(10)': (10, None), 
         # 'Richard-Lucy(20)': (20, None), 
