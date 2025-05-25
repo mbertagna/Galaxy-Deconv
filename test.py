@@ -9,8 +9,7 @@ from tqdm import tqdm
 
 from models.Richard_Lucy import Richard_Lucy
 from models.Tikhonet import Tikhonet
-# from models.Unrolled_ADMM import Unrolled_ADMM
-from models.unrolled_admm_gaussian import UnrolledADMMGaussian
+from models.Unrolled_ADMM import Unrolled_ADMM
 from models.Wiener import Wiener
 from utils.utils_data import get_dataloader
 from utils.utils_test import delta_2D, estimate_shear
@@ -40,11 +39,9 @@ def test_shear(method, n_iters, model_file, n_gal, snrs, data_path, result_path)
     elif method == 'ShapeNet' or 'Laplacian' in method:
         model = Tikhonet(filter='Laplacian')
     elif 'Gaussian' in method:
-        # model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
-        model = UnrolledADMMGaussian(n_iters=n_iters, PnP=True)
+        model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
     else:
-        # model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
-        model = UnrolledADMMGaussian(n_iters=n_iters, llh='Poisson', PnP=True)
+        model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
 
     if model is not None:
         model.to(device)
@@ -136,11 +133,9 @@ def test_time(method, n_iters, model_file, n_gal, data_path, result_path):
     elif method == 'ShapeNet' or 'Laplacian' in method:
         model = Tikhonet(filter='Laplacian')
     elif 'Gaussian' in method:
-        # model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
-        model = UnrolledADMMGaussian(n_iters=n_iters, PnP=True)
+        model = Unrolled_ADMM(n_iters=n_iters, llh='Gaussian', PnP=True)
     else:
-        # model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
-        model = UnrolledADMMGaussian(n_iters=n_iters, llh='Poisson', PnP=True)
+        model = Unrolled_ADMM(n_iters=n_iters, llh='Poisson', PnP=True)
 
     if model is not None:
         model.to(device)

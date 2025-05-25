@@ -9,7 +9,6 @@ from torch.optim import Adam
 from models.ResUNet import ResUNet
 from models.Tikhonet import Tikhonet
 from models.Unrolled_ADMM import Unrolled_ADMM
-from models.unrolled_admm_gaussian import UnrolledADMMGaussian
 from utils.utils_data import get_dataloader
 from utils.utils_plot import plot_loss
 from utils.utils_train import MultiScaleLoss, ShapeConstraint, get_model_name, BestEllipseLoss, MomentBasedLoss, ShapeletMomentsLoss, FPFSLoss, FPFSCoeffLoss
@@ -37,8 +36,7 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     train_loader, val_loader = get_dataloader(data_path=data_path, train=True, train_val_split=train_val_split, batch_size=batch_size, num_workers=0)
     
     if 'ADMM' in model_name:
-        # model = Unrolled_ADMM(n_iters=n_iters, llh=llh, PnP=PnP, subnet=not remove_SubNet)
-        model = UnrolledADMMGaussian(n_iters=n_iters, PnP=PnP, subnet=True)
+        model = Unrolled_ADMM(n_iters=n_iters, llh=llh, PnP=PnP, subnet=not remove_SubNet)
     elif 'Tikhonet' in model_name:
         model = Tikhonet(filter=filter)
     elif 'ShapeNet' in model_name:
