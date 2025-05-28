@@ -22,11 +22,18 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove_SubNet=False, filter='Laplacian',
-          n_epochs=10, lr=1e-4, loss='MultiScale',
+          n_epochs=10, lr=1e-4, loss='MultiScale', flux_norm=False, remove_coeffs=[], 
           data_path='./simulated_datasets/LSST_23.5_deconv/', train_val_split=0.8, batch_size=32,
           model_save_path='./saved_models/', pretrained_epochs=0):
     
     model_name = get_model_name(method=model_name, loss=loss, filter=filter, n_iters=n_iters, llh=llh, PnP=PnP, remove_SubNet=remove_SubNet)
+
+    if flux_norm:
+        model_name += '_flux_norm'
+
+    if remove_coeffs:
+        model_name += f'_{"_".join(rc for rc in remove_coeffs)}'
+
     logger = logging.getLogger('Train')
     logger.info(' Start training %s on %s data for %s epochs.', model_name, data_path, n_epochs)
     
@@ -73,7 +80,7 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     elif loss == 'FPFSLoss':
         loss_fn = FPFSLoss()
     elif loss == 'FPFSCoeffLoss':
-        loss_fn = FPFSCoeffLoss()
+        loss_fn = FPFSCoeffLoss(flux_norm=flux_norm, remove_coeffs=remove_coeffs)
     elif loss == 'L1_FPFSLoss':
         loss_fn = MultiScaleLoss(scales=1, aux_loss_fn=FPFSLoss(), aux_weight=0.1)
     elif loss == 'L1':
@@ -200,10 +207,12 @@ if __name__ == "__main__":
     parser.add_argument('--train_val_split', type=float, default=0.9)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
+    parser.add_argument('--flux_norm', action='store_true', help='Enable flux normalization')
+    parser.add_argument('--remove_coeffs', nargs='*', type=str, default=[], help='List of coefficient names to remove')
     opt = parser.parse_args()
 
 
     train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
-          n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss,
+          n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss, flux_norm=opt.flux_norm, remove_coeffs=opt.remove_coeffs, 
           data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
           model_save_path='./saved_models_shape_loss/', pretrained_epochs=opt.pretrained_epochs)

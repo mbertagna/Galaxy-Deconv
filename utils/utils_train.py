@@ -10,7 +10,7 @@ from utils.utils_fourier import get_bfunc, project_img_onto_bfunc, get_shape_par
 
 def get_model_name(method, loss, filter='Laplacian', n_iters=8, llh='Gaussian', PnP=True, remove_SubNet=False):
     if method == 'Unrolled_ADMM':
-        model_name = f'{llh}{"_PnP" if PnP else ""}_ADMM_{n_iters}iters{"_No_SubNet" if remove_SubNet else ""}' 
+        model_name = f'{llh[0]}{"_PnP" if PnP else ""}_ADMM_{n_iters}it{"_No_SubNet" if remove_SubNet else ""}' 
     elif method == 'Tikhonet' or method == 'ShapeNet':
         model_name = f'{method}_{filter}'
     else:
@@ -338,11 +338,13 @@ class FPFSLoss(nn.Module):
         return loss
     
 class FPFSCoeffLoss(nn.Module):
-    def __init__(self, norm='L1', shape=(48, 48)):
+    def __init__(self, norm='L1', flux_norm=False, remove_coeffs=[], shape=(48, 48)):
         super(FPFSCoeffLoss, self).__init__()
         self.bfunc, self.bfunc_key = get_bfunc(npix=shape[0], pixel_scale=0.2, sigma_arcsec=0.52)
+        self.flux_norm = flux_norm  # Store the flux normalization parameter
+        
         self.loss_coeffs = [
-            # "m00",
+            "m00",
             "m20",
             "m22c",
             "m22s",
@@ -355,7 +357,12 @@ class FPFSCoeffLoss(nn.Module):
             # "m64c",
             # "m64s",
         ]
+
+        for rc in remove_coeffs:
+            self.loss_coeffs.remove(rc)
+
         self.indices = [self.bfunc_key[c] for c in self.loss_coeffs]
+        self.m00_index = self.bfunc_key["m00"]
 
         rows, cols = shape
         self.xc = cols / 2
@@ -383,8 +390,18 @@ class FPFSCoeffLoss(nn.Module):
         target_values = target_coeffs[:, self.indices].real
         output_values = output_coeffs[:, self.indices].real
 
-        return self.loss(output_values, target_values)
+        if self.flux_norm:
+            target_flux = target_coeffs[:, self.m00_index].real
+            output_flux = output_coeffs[:, self.m00_index].real
+            
+            target_flux = target_flux.clamp(min=1e-8)
+            output_flux = output_flux.clamp(min=1e-8)
+            
+            target_values = target_values / target_flux.unsqueeze(1)
+            output_values = output_values / output_flux.unsqueeze(1)
 
+        return self.loss(output_values, target_values)
+    
 class ShapeConstraint(nn.Module):
     def __init__(self, device, fov_pixels=48, gamma=1, n_shearlet=2):
         super(ShapeConstraint, self).__init__()
