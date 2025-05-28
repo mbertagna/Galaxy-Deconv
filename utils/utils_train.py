@@ -353,9 +353,9 @@ class FPFSCoeffLoss(nn.Module):
             "m42s",
             "m44c",
             "m44s",
-            # "m60",
-            # "m64c",
-            # "m64s",
+            "m60",
+            "m64c",
+            "m64s",
         ]
 
         for rc in remove_coeffs:
