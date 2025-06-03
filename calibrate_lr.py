@@ -91,7 +91,7 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     elif loss == 'FPFSLoss':
         loss_fn = FPFSLoss()
     elif loss == 'FPFSCoeffLoss':
-        loss_fn = FPFSCoeffLoss(flux_norm=flux_norm, remove_coeffs=remove_coeffs)
+        loss_fn = FPFSCoeffLoss(flux_norm=flux_norm, loss_coeffs=loss_coeffs)
     elif loss == 'L1_FPFSLoss':
         loss_fn = MultiScaleLoss(scales=1, aux_loss_fn=FPFSLoss(), aux_weight=0.1)
     elif loss == 'L1':
