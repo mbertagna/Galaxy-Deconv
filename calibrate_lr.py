@@ -33,7 +33,7 @@ def compute_grad_norm(model):
 
 
 def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove_SubNet=False, filter='Laplacian',
-          loss='MultiScale', flux_norm=False, remove_coeffs=[], 
+          loss='MultiScale', flux_norm=False, loss_coeffs=[], 
           data_path='./simulated_datasets/LSST_23.5_deconv/', train_val_split=0.8, batch_size=32,
           model_save_path='./saved_models/', pretrained_epochs=0):
     
@@ -42,8 +42,8 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     if flux_norm:
         model_name += '_flux_norm'
 
-    if remove_coeffs:
-        model_name += f'_{"_".join(rc for rc in remove_coeffs)}'
+    if loss_coeffs:
+        model_name += f'_{"_".join(c for c in loss_coeffs)}'
 
     logger = logging.getLogger('Train')
     logger.info(' Start learning rate calibration %s on %s data.', model_name, data_path)
@@ -147,11 +147,11 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
     parser.add_argument('--flux_norm', action='store_true', help='Enable flux normalization')
-    parser.add_argument('--remove_coeffs', nargs='*', type=str, default=[], help='List of coefficient names to remove')
+    parser.add_argument('--loss_coeffs', nargs='*', type=str, default=[], help='List of coefficient names to include', choices=["m00", "m20", "m22c", "m22s", "m40", "m42c", "m42s", "m44c", "m44s", "m60", "m64c", "m64s"])
     opt = parser.parse_args()
 
 
     train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
-          loss=opt.loss, flux_norm=opt.flux_norm, remove_coeffs=opt.remove_coeffs, 
+          loss=opt.loss, flux_norm=opt.flux_norm, loss_coeffs=opt.loss_coeffs, 
           data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
           model_save_path='./saved_models_shape_loss/', pretrained_epochs=opt.pretrained_epochs)
