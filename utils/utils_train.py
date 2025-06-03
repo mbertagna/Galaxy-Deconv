@@ -337,29 +337,40 @@ class FPFSLoss(nn.Module):
         
         return loss
     
+"m20",
+"m22c",
+"m22s",
+"m40",
+"m42c",
+"m42s",
+"m44c",
+"m44s",
+    
 class FPFSCoeffLoss(nn.Module):
-    def __init__(self, norm='L1', flux_norm=False, remove_coeffs=[], shape=(48, 48)):
+    def __init__(self, 
+                 norm='L1', 
+                 flux_norm=False, 
+                 loss_coeffs=[
+                            "m00",
+                            "m20",
+                            "m22c",
+                            "m22s",
+                            "m40",
+                            "m42c",
+                            "m42s",
+                            "m44c",
+                            "m44s",
+                            "m60",
+                            "m64c",
+                            "m64s",
+                            ], 
+                    shape=(48, 48),
+                    ):
         super(FPFSCoeffLoss, self).__init__()
         self.bfunc, self.bfunc_key = get_bfunc(npix=shape[0], pixel_scale=0.2, sigma_arcsec=0.52)
-        self.flux_norm = flux_norm  # Store the flux normalization parameter
+        self.flux_norm = flux_norm
         
-        self.loss_coeffs = [
-            "m00",
-            "m20",
-            "m22c",
-            "m22s",
-            "m40",
-            "m42c",
-            "m42s",
-            "m44c",
-            "m44s",
-            "m60",
-            "m64c",
-            "m64s",
-        ]
-
-        for rc in remove_coeffs:
-            self.loss_coeffs.remove(rc)
+        self.loss_coeffs = loss_coeffs
 
         self.indices = [self.bfunc_key[c] for c in self.loss_coeffs]
         self.m00_index = self.bfunc_key["m00"]

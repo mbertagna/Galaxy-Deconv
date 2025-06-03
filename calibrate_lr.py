@@ -4,7 +4,7 @@ import os
 import numpy as np
 
 import torch
-from torch.optim import Adam
+# from torch.optim import Adam
 
 from models.ResUNet import ResUNet
 from models.Tikhonet import Tikhonet
@@ -19,6 +19,17 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+def compute_grad_norm(model):
+    """Compute the L2 norm of gradients across all model parameters."""
+    total_norm = 0.0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** (1. / 2)
+    return total_norm
 
 
 def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove_SubNet=False, filter='Laplacian',
@@ -88,27 +99,37 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     
     # Evaluate on train dataset.
     train_loss = 0.0
-    model.eval()
-    with torch.no_grad():
-        for _, ((obs, psf, alpha), gt) in enumerate(train_loader):
-            obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
-            rec = model(obs, psf, alpha)
-            loss = loss_fn(gt, rec)
-            train_loss += loss.item()
+    train_grad_norm = 0.0
+    model.train()
+    for _, ((obs, psf, alpha), gt) in enumerate(train_loader):
+        obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+        model.zero_grad()
+        rec = model(obs, psf, alpha)
+        loss = loss_fn(gt, rec)
+        loss.backward()
+        grad_norm = compute_grad_norm(model)
+        train_loss += loss.item()
+        train_grad_norm += grad_norm
 
     # Evaluate on val dataset.
     val_loss = 0.0
-    model.eval()
-    with torch.no_grad():
-        for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
-            obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
-            rec = model(obs, psf, alpha)
-            loss = loss_fn(gt, rec)
-            val_loss += loss.item()
+    val_grad_norm = 0.0
+    model.train()
+    for _, ((obs, psf, alpha), gt) in enumerate(val_loader):
+        obs, psf, alpha, gt = obs.to(device), psf.to(device), alpha.to(device), gt.to(device)
+        model.zero_grad()
+        rec = model(obs, psf, alpha)
+        loss = loss_fn(gt, rec)
+        loss.backward()
+        grad_norm = compute_grad_norm(model)
+        val_loss += loss.item()
+        val_grad_norm += grad_norm
 
-    logger.info(" [train_loss={:.4g}  val_loss={:.4g}]".format(
+    logger.info(" [train_loss={:.4g}  train_grad_norm={:.4g}  val_loss={:.4g}  val_grad_norm={:.4g}]".format(
         train_loss/len(train_loader),
-        val_loss/len(val_loader)))
+        train_grad_norm/len(train_loader),
+        val_loss/len(val_loader),
+        val_grad_norm/len(val_loader)))
 
 
 
