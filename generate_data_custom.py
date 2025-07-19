@@ -148,7 +148,7 @@ def generate_data_deconv(data_path, n_train=40000, load_info=True,
 
     # Read the catalog.
     try:
-        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/galsim/share/COSMOS_23.5_training_sample', sample=I)
+        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/galsim/share/COSMOS_23.5_training_sample/', sample=I)
         n_total = real_galaxy_catalog.nobjects #- 56030
         logger.info(' Successfully read in %s I=%s galaxies.', n_total, I)
     except:
@@ -200,7 +200,9 @@ def generate_data_deconv(data_path, n_train=40000, load_info=True,
     sky_level_pixel = get_flux(ab_magnitude=sky_brightness, exp_time=exp_time, zero_point=zero_point, gain=gain, qe=qe) * pixel_scale ** 2 # Sky level (ADU/pixel).
     sigma = np.sqrt(sky_level_pixel + (read_noise*qe/gain) ** 2) # Standard deviation of total noise (ADU/pixel).
 
-    for k in tqdm(range(0, n_total)):
+    # The loop was originally set to iterate through n_total, which is the entire dataset.
+    # This has been changed to n_train to respect the command-line argument.
+    for k in tqdm(range(0, n_train)):
         idx = sequence[k] # Index of galaxy in the catalog.
 
         # Atmospheric PSF
