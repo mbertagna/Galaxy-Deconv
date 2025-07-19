@@ -111,7 +111,7 @@ def get_COSMOS_Galaxy(real_galaxy_catalog, idx,
     return gal_image
 
 
-def generate_data_deconv(data_path, n_train=40000, load_info=True,
+def generate_data_deconv(data_path, n_train=40000, n_test=10000, load_info=True,
                          survey='LSST', I='23.5', fov_pixels=48, pixel_scale=0.2, upsample=4,
                          snr=100,
                          shear_errs=[0.001, 0.002, 0.003, 0.005, 0.007, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],
@@ -148,9 +148,9 @@ def generate_data_deconv(data_path, n_train=40000, load_info=True,
 
     # Read the catalog.
     try:
-        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/galsim/share/COSMOS_23.5_training_sample/', sample=I)
-        n_total = real_galaxy_catalog.nobjects #- 56030
-        logger.info(' Successfully read in %s I=%s galaxies.', n_total, I)
+        real_galaxy_catalog = galsim.RealGalaxyCatalog(dir='/home/michaelbertagna/git/Galaxy-Deconv/Galaxy-Deconv.env/lib/python3.11/site-packages/galsim/share/COSMOS_23.5_training_sample', sample=I)
+        n_catalog = real_galaxy_catalog.nobjects #- 56030
+        logger.info(' Successfully read in %s I=%s galaxies.', n_catalog, I)
     except:
         raise Exception(' Failed reading in I=%s galaxies.', I)
     
@@ -163,15 +163,17 @@ def generate_data_deconv(data_path, n_train=40000, load_info=True,
             sequence = info['sequence']
             I = info['I']
             pixel_scale = info['pixel_scale']
-            n_total, n_train, n_test = info['n_total'], info['n_train'], info['n_test']
+            n_catalog, n_train, n_test = info['n_catalog'], info['n_train'], info['n_test']
             logger.info(' Successfully loaded dataset information from %s.', info_file)
         except:
             raise Exception(' Failed loading dataset information from %s.', info_file)
     else:
-        sequence = np.arange(0, n_total) # Generate random sequence for dataset.
+        if n_train + n_test > n_catalog:
+            raise ValueError(f"n_train ({n_train}) + n_test ({n_test}) cannot be larger than the number of galaxies in the catalog ({n_catalog}).")
+        sequence = np.arange(0, n_catalog) # Generate random sequence for dataset.
         np.random.shuffle(sequence)
         info = {'survey':survey, 'I':I, 'fov_pixels':fov_pixels, 'pixel_scale':pixel_scale,
-                'n_total':n_total, 'n_train':n_train, 'n_test':n_total - n_train, 'sequence':sequence.tolist()}
+                'n_catalog':n_catalog, 'n_train':n_train, 'n_test':n_test, 'sequence':sequence.tolist()}
         with open(info_file, 'w') as f:
             json.dump(info, f)
         logger.info(' Dataset information saved to %s.', info_file)
@@ -200,9 +202,7 @@ def generate_data_deconv(data_path, n_train=40000, load_info=True,
     sky_level_pixel = get_flux(ab_magnitude=sky_brightness, exp_time=exp_time, zero_point=zero_point, gain=gain, qe=qe) * pixel_scale ** 2 # Sky level (ADU/pixel).
     sigma = np.sqrt(sky_level_pixel + (read_noise*qe/gain) ** 2) # Standard deviation of total noise (ADU/pixel).
 
-    # The loop was originally set to iterate through n_total, which is the entire dataset.
-    # This has been changed to n_train to respect the command-line argument.
-    for k in tqdm(range(0, n_train)):
+    for k in tqdm(range(0, n_train + n_test)):
         idx = sequence[k] # Index of galaxy in the catalog.
 
         # Atmospheric PSF
@@ -458,6 +458,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Arguments for dataset.')
     parser.add_argument('--task', type=str, default='Deconv', choices=['Deconv', 'Denoise'])
     parser.add_argument('--n_train', type=int, default=40000)
+    parser.add_argument('--n_test', type=int, default=10000)
     parser.add_argument('--load_info', action="store_true")
     parser.add_argument('--survey', type=str, default='LSST', choices=['LSST', 'JWST'])
     parser.add_argument('--I', type=str, default='23.5', choices=['23.5', '25.2'])
@@ -470,13 +471,13 @@ if __name__ == "__main__":
     if opt.task == 'Deconv':
         if isinstance(opt.snr, int):
             data_path = f'/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv_snr{opt.snr}/'
-            generate_data_deconv(data_path=data_path, n_train=opt.n_train, load_info=opt.load_info,
+            generate_data_deconv(data_path=data_path, n_train=opt.n_train, n_test=opt.n_test, load_info=opt.load_info,
                                  survey=opt.survey, I=opt.I, fov_pixels=opt.fov_pixels, pixel_scale=opt.pixel_scale, upsample=opt.upsample,
                                  snr=opt.snr)
         elif isinstance(opt.snr, list):
             for snr_val in opt.snr:
                 data_path = f'/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv_snr{snr_val}/'
-                generate_data_deconv(data_path=data_path, n_train=opt.n_train, load_info=opt.load_info,
+                generate_data_deconv(data_path=data_path, n_train=opt.n_train, n_test=opt.n_test, load_info=opt.load_info,
                                      survey=opt.survey, I=opt.I, fov_pixels=opt.fov_pixels, pixel_scale=opt.pixel_scale, upsample=opt.upsample,
                                      snr=snr_val)
     elif opt.task == 'Denoise':
