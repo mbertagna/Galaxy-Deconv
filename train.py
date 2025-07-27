@@ -23,7 +23,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove_SubNet=False, filter='Laplacian',
-          n_epochs=10, lr=1e-4, loss='MultiScale', flux_norm=False, loss_coeffs=[], 
+          n_epochs=10, lr=1e-4, loss='MultiScale', flux_norm=False, loss_coeffs=[], snr=None,
           data_path='./simulated_datasets/LSST_23.5_deconv/', train_val_split=0.8, batch_size=32,
           model_save_path='./saved_models/', pretrained_epochs=0):
     
@@ -34,6 +34,9 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
 
     if loss_coeffs:
         model_name += f'_{"_".join(c for c in loss_coeffs)}'
+
+    if snr is not None:
+        model_name += f'_snr{snr}'
 
     logger = logging.getLogger('Train')
     logger.info(' Start training %s on %s data for %s epochs.', model_name, data_path, n_epochs)
@@ -210,10 +213,14 @@ if __name__ == "__main__":
     parser.add_argument('--pretrained_epochs', type=int, default=0)
     parser.add_argument('--flux_norm', action='store_true', help='Enable flux normalization')
     parser.add_argument('--loss_coeffs', nargs='*', type=str, default=[], help='List of coefficient names to include', choices=["m00", "m20", "m22c", "m22s", "m40", "m42c", "m42s", "m44c", "m44s", "m60", "m64c", "m64s"])
+    parser.add_argument('--snr', type=int, default=None, help='SNR value for dataset')
     opt = parser.parse_args()
 
+    data_path = '/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/'
+    if opt.snr is not None:
+        data_path = f'/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv_snr{opt.snr}/'
 
     train(model_name=opt.model, n_iters=opt.n_iters, llh=opt.llh, PnP=True, remove_SubNet=opt.remove_SubNet, filter=opt.filter,
-          n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss, flux_norm=opt.flux_norm, loss_coeffs=opt.loss_coeffs, 
-          data_path='/Users/michaelbertagna/git/Galaxy-Deconv/simulated_datasets/LSST_23.5_deconv/', train_val_split=opt.train_val_split, batch_size=opt.batch_size,
+          n_epochs=opt.n_epochs, lr=opt.lr, loss=opt.loss, flux_norm=opt.flux_norm, loss_coeffs=opt.loss_coeffs, snr=opt.snr,
+          data_path=data_path, train_val_split=opt.train_val_split, batch_size=opt.batch_size,
           model_save_path='./saved_models_shape_loss/', pretrained_epochs=opt.pretrained_epochs)
