@@ -72,9 +72,9 @@ class Galaxy_Dataset(Dataset):
         try:
             with open(self.info_file, 'r') as f:
                 self.info = json.load(f)
-            self.n_total = self.info['n_total']
             self.n_train = self.info['n_train']
             self.n_test = self.info['n_test']
+            self.n_total = self.info.get('n_total', self.n_train + self.n_test)
             self.sequence = self.info['sequence']
             self.logger.info(" Successfully constructed %s dataset. Total Samples: %s.",
                              'train' if self.train else 'test', self.n_train if self.train else self.n_test)
