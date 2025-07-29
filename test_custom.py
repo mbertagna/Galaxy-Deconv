@@ -71,12 +71,12 @@ def test_shear(method, n_iters, model_file, n_gal, data_path, result_path):
     rec_shear, gt_shear = [], []
     for ((obs, psf, alpha), gt), idx in zip(test_loader, tqdm(range(n_gal))):
         with torch.no_grad():
-            if method == 'No_Deconv':
+            if 'No_Deconv' in method:
                 gt = gt.cpu().squeeze(dim=0).squeeze(dim=0).detach().numpy()
                 obs = obs.cpu().squeeze(dim=0).squeeze(dim=0).detach().numpy()
                 gt_shear.append(estimate_shear(gt, psf_delta))
                 rec_shear.append(estimate_shear(obs, psf_delta))
-            elif method == 'FPFS':
+            elif 'FPFS' in method:
                 psf = psf.cpu().squeeze(dim=0).squeeze(dim=0).detach().numpy()
                 obs = obs.cpu().squeeze(dim=0).squeeze(dim=0).detach().numpy()
                 rec_shear.append(estimate_shear(obs, psf))
@@ -108,7 +108,7 @@ def test_shear(method, n_iters, model_file, n_gal, data_path, result_path):
     if str(snr) not in results:
         results[str(snr)] = {}
     results[str(snr)]['rec_shear'] = rec_shear
-    if method == 'No_Deconv':
+    if 'No_Deconv' in method:
         results[str(snr)]['gt_shear'] = gt_shear
     
     with open(results_file, 'w') as f:
@@ -162,10 +162,10 @@ def test_time(method, n_iters, model_file, n_gal, data_path, result_path):
     time_start = time.time()
     for ((obs, psf, alpha), gt), idx in zip(test_loader, tqdm(range(n_gal))):
         with torch.no_grad():
-            if method == 'No_Deconv':
+            if 'No_Deconv' in method:
                 obs = obs.cpu().squeeze(dim=0).squeeze(dim=0).detach().numpy()
                 rec_shear.append(estimate_shear(obs, psf_delta))
-            elif method == 'FPFS':
+            elif 'FPFS' in method:
                 psf = psf.cpu().squeeze(dim=0).squeeze(dim=0).detach().numpy()
                 obs = obs.cpu().squeeze(dim=0).squeeze(dim=0).detach().numpy()
                 rec_shear.append(estimate_shear(obs, psf))
@@ -218,26 +218,36 @@ if __name__ == "__main__":
     
     # Uncomment the methods to be tested.
     methods = {
+        'No_Deconv_snr20': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr20/"),
+        'FPFS_snr20': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr20/"),
         'Unrolled_ADMM_Gaussian(2)_snr20': (
             2, 
             "./saved_models_shape_loss/G_PnP_ADMM_2it_FPFSCoeffLoss_m20_m22c_m22s_m40_m42c_m42s_m44c_m44s_snr20_20epochs.pth",
-            "./simulated_datasets/LSST_23.5_deconv_snr020/"
+            "./simulated_datasets/LSST_23.5_deconv_snr20/"
         ),
+        'No_Deconv_snr40': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr40/"),
+        'FPFS_snr40': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr40/"),
         'Unrolled_ADMM_Gaussian(2)_snr40': (
             2,
             "./saved_models_shape_loss/G_PnP_ADMM_2it_FPFSCoeffLoss_m20_m22c_m22s_m40_m42c_m42s_m44c_m44s_snr40_20epochs.pth", 
-            "./simulated_datasets/LSST_23.5_deconv_snr040/"
+            "./simulated_datasets/LSST_23.5_deconv_snr40/"
         ),
+        'No_Deconv_snr60': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr60/"),
+        'FPFS_snr60': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr60/"),
         'Unrolled_ADMM_Gaussian(2)_snr60': (
             2,
             "./saved_models_shape_loss/G_PnP_ADMM_2it_FPFSCoeffLoss_m20_m22c_m22s_m40_m42c_m42s_m44c_m44s_snr60_20epochs.pth",
-            "./simulated_datasets/LSST_23.5_deconv_snr060/"
+            "./simulated_datasets/LSST_23.5_deconv_snr60/"
         ),
+        'No_Deconv_snr80': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr80/"),
+        'FPFS_snr80': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr80/"),
         'Unrolled_ADMM_Gaussian(2)_snr80': (
             2,
             "./saved_models_shape_loss/G_PnP_ADMM_2it_FPFSCoeffLoss_m20_m22c_m22s_m40_m42c_m42s_m44c_m44s_snr80_20epochs.pth",
-            "./simulated_datasets/LSST_23.5_deconv_snr080/"
+            "./simulated_datasets/LSST_23.5_deconv_snr80/"
         ),
+        'No_Deconv_snr100': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr100/"),
+        'FPFS_snr100': (0, None, "./simulated_datasets/LSST_23.5_deconv_snr100/"),
         'Unrolled_ADMM_Gaussian(2)_snr100': (
             2,
             "./saved_models_shape_loss/G_PnP_ADMM_2it_FPFSCoeffLoss_m20_m22c_m22s_m40_m42c_m42s_m44c_m44s_snr100_20epochs.pth",
