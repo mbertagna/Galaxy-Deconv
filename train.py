@@ -212,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument('--filter', type=str, default='Laplacian', choices=['Identity', 'Laplacian'])
     parser.add_argument('--n_epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss', 'FPFSLoss', 'L1_FPFSLoss', 'FPFSCoeffLoss', 'L1'])
+    parser.add_argument('--loss', type=str, default='MultiScale', choices=['MultiScale', 'MSE', 'Shape', 'BestEllipse', 'MomentBasedLoss', 'ShapeletMomentsLoss', 'FPFSLoss', 'L1_FPFSLoss', 'FPFSCoeffLoss', 'L1', 'L1_FPFSCoeffLoss'])
     parser.add_argument('--train_val_split', type=float, default=0.9)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--pretrained_epochs', type=int, default=0)
