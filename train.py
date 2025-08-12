@@ -23,7 +23,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove_SubNet=False, filter='Laplacian',
-          n_epochs=10, lr=1e-4, loss='MultiScale', flux_norm=False, loss_coeffs=[], snr=None, aux_weight=0.1,
+          n_epochs=10, lr=1e-4, loss='MultiScale', flux_norm=False, loss_coeffs=[], snr=None, aux_weight=None,
           data_path='./simulated_datasets/LSST_23.5_deconv/', train_val_split=0.8, batch_size=32,
           model_save_path='./saved_models/', pretrained_epochs=0):
     
@@ -35,11 +35,11 @@ def train(model_name='Unrolled ADMM', n_iters=8, llh='Poisson', PnP=True, remove
     if loss_coeffs:
         model_name += f'_{"_".join(c for c in loss_coeffs)}'
 
-    if snr is not None:
+    if snr:
         model_name += f'_snr{snr}'
 
-    if aux_weight != 0.1:
-        model_name += f'_aux_weight{aux_weight:.2f}'
+    if aux_weight:
+        model_name += f'_aux_weight{aux_weight}'
 
     logger = logging.getLogger('Train')
     logger.info(' Start training %s on %s data for %s epochs.', model_name, data_path, n_epochs)
